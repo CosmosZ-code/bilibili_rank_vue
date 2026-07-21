@@ -36,7 +36,7 @@ export default defineEventHandler(async (event) => {
 
   // 3. 加密存储
   const config = useRuntimeConfig()
-  const encrypted = encrypt(cookie, config.encryptKey)
+  const encrypted = await encrypt(cookie, config.encryptKey)
 
   await useStorage('bilibili').setItem(`user:${sessionId}:cookie`, encrypted)
 

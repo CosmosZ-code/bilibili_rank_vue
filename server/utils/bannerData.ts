@@ -1,13 +1,12 @@
 /**
  * Banner 数据加载与备用数据集
  *
- * - 自动扫描 public/assets/ 下所有 YYYY-MM-DD 格式目录
- * - 取最新 5 套，不足时用 CDN 备用数据补齐
- * - 7 天内存缓存，配合 refresh-banners 任务每周刷新
+ * - 构建时：scripts/build-banner-manifest.ts 扫描 public/assets/ 生成清单
+ * - 运行时：读取构建时生成的清单，不足 5 套时用 CDN 备用数据补齐
+ * - 兼容 Node.js 和 Cloudflare Workers 运行时（无 fs 依赖）
  */
 import type { BannerDataSet, BannerLayerData } from '../../app/types'
-import { readdirSync, readFileSync, existsSync } from 'node:fs'
-import { join } from 'node:path'
+import manifest from '../generated/banner-manifest'
 
 // ============================================================
 // 备用数据集 1 — 海洋生物-乌龟
@@ -259,135 +258,40 @@ export function getFallbackBanners(): BannerDataSet[] {
 }
 
 // ============================================================
-// 缓存（模块级，进程存活期间有效）
+// Banner 加载（构建时清单 + fallback 补齐）
 // ============================================================
 
-const CACHE_TTL = 7 * 24 * 60 * 60 * 1000 // 7 天
-let cache: { data: BannerDataSet[]; timestamp: number } | null = null
-
-export function clearBannerCache(): void {
-  cache = null
-}
-
-// ============================================================
-// 目录扫描 + 加载
-// ============================================================
-
-/** 判断是否为日期目录（YYYY-MM-DD） */
-function isDateDir(name: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}$/.test(name)
-}
+const MAX_BANNERS = 5
 
 /**
- * 修正 Banner 图层的 src 路径
+ * 获取全部 Banner 数据集
  *
- * data.json 中的 src 可能是：
- * - ./xxx.webp                 → 补全为 /assets/{dir}/xxx.webp
- * - ./assets/{dir}/xxx.webp    → 转为 /assets/{dir}/xxx.webp
- * - https://...                → 保持原样（CDN fallback）
- * - /assets/...                → 保持原样（已是绝对路径）
+ * 优先使用构建时扫描生成的本地 Banner 数据，
+ * 不足 5 套时用 CDN 备用数据补齐。
  */
-function fixBannerSrc(src: string, dir: string): string {
-  if (!src) return src
-  // CDN URL 或已为绝对路径
-  if (src.startsWith('http://') || src.startsWith('https://') || src.startsWith('/')) return src
-  // 去掉 ./ 前缀
-  const cleaned = src.replace(/^\.\//, '')
-  // 如果包含 assets/ 前缀，去掉重复部分
-  const filename = cleaned.replace(/^assets\/[^/]+\//, '')
-  return `/assets/${dir}/${filename}`
-}
-
-/**
- * 动态扫描 public/assets/ 目录，返回最新 5 套 Banner
- *
- * - 按日期降序排列，取前 5 个
- * - 并行 fetch data.json，失败静默跳过
- * - 不足 5 套时用 CDN 备用数据补齐
- * - 结果缓存 7 天
- */
-/**
- * 规范化 grab.js 抓取的图层数据
- *
- * grab.js 输出的 data.json 中 opacity 等字段可能是字符串，
- * 这里统一转为 number，确保运行时类型一致。
- */
-function normalizeLayer(layer: Record<string, unknown>): BannerLayerData {
-  const normalized = { ...layer } as Record<string, unknown>
-
-  // opacity: ["0.7", "0.7"] → [0.7, 0.7]
-  if (Array.isArray(normalized.opacity)) {
-    normalized.opacity = (normalized.opacity as string[]).map(Number)
-  }
-
-  // transform 元素确保为 number
-  if (Array.isArray(normalized.transform)) {
-    normalized.transform = (normalized.transform as unknown[]).map(Number)
-  }
-
-  // 各数值字段强制转换
-  for (const key of ['a', 'f', 'g', 'deg', 'blur', 'width', 'height']) {
-    if (typeof normalized[key] === 'string') {
-      normalized[key] = Number(normalized[key])
-    }
-  }
-
-  return normalized as unknown as BannerLayerData
-}
-
 export async function loadAllBanners(): Promise<BannerDataSet[]> {
-  // 检查缓存
-  if (cache && Date.now() - cache.timestamp < CACHE_TTL) {
-    return cache.data
+  const banners: BannerDataSet[] = []
+
+  // 1. 从构建时清单加载（按日期降序，取前 MAX_BANNERS 套）
+  if (Array.isArray(manifest) && manifest.length > 0) {
+    banners.push(...manifest.slice(0, MAX_BANNERS))
   }
 
-  const MAX_BANNERS = 5
-
-  try {
-    // Nitro 环境下 public/ 直接映射到文件系统
-    const assetsDir = join(process.cwd(), 'public', 'assets')
-    let dateDirs: string[] = []
-
-    try {
-      dateDirs = readdirSync(assetsDir, { withFileTypes: true })
-        .filter((e) => e.isDirectory() && isDateDir(e.name))
-        .map((e) => e.name)
-        .sort((a, b) => b.localeCompare(a)) // 降序：最新在前
-        .slice(0, MAX_BANNERS)
-    } catch {
-      // public/assets/ 不存在，使用 fallback
-    }
-
-	    // 同步读取 data.json（比 fetch 更可靠，不依赖 HTTP）
-	    const banners: BannerDataSet[] = []
-	    for (const dir of dateDirs) {
-	      const jsonPath = join(assetsDir, dir, 'data.json')
-	      if (!existsSync(jsonPath)) continue
-	      try {
-		        const raw = readFileSync(jsonPath, 'utf-8')
-		        const layers = JSON.parse(raw)
-		        // 规范化 + 修正 src 路径
-		        const data = layers.map((layer: Record<string, unknown>) => {
-		          const normalized = normalizeLayer(layer)
-		          return { ...normalized, src: fixBannerSrc(normalized.src, dir) }
-		        })
-	        banners.push({ name: dir, data })
-	      } catch {
-	        // JSON 解析失败，跳过
-	      }
-	    }
-
-    // 不足 5 套时 fallback 补齐
-    if (banners.length < MAX_BANNERS) {
-      const fallback = getFallbackBanners()
-      banners.push(...fallback.slice(0, MAX_BANNERS - banners.length))
-    }
-
-    // 写入缓存
-    cache = { data: banners, timestamp: Date.now() }
-    return banners
-  } catch {
-    // 完全失败，返回 fallback
-    return getFallbackBanners()
+  // 2. 不足 5 套时 fallback 补齐
+  if (banners.length < MAX_BANNERS) {
+    const fallback = getFallbackBanners()
+    banners.push(...fallback.slice(0, MAX_BANNERS - banners.length))
   }
+
+  return banners.length > 0 ? banners : getFallbackBanners()
+}
+
+/**
+ * 清除 Banner 缓存
+ *
+ * Cloudflare Workers 环境下模块级变量不跨 isolate 共享，
+ * 此函数保留用于接口兼容，实际不执行任何操作。
+ */
+export function clearBannerCache(): void {
+  // 无需操作 — Banner 数据在构建时已打包，无运行时缓存
 }

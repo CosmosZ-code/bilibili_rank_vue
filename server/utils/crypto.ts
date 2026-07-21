@@ -1,45 +1,76 @@
 /**
- * Cookie 加解密工具
+ * Cookie 加解密工具（Web Crypto API 版本）
  *
- * 使用 Node.js 内置 crypto 模块的 AES-256-GCM 加密
- * 加密用户提交的 B站 Cookie，安全存储到 Nitro Storage
+ * 使用 Web Crypto API 的 AES-256-GCM 加密
+ * 同时兼容 Node.js 和 Cloudflare Workers 运行时
+ *
+ * 密文格式：salt(32) + iv(16) + ciphertext+tag（Base64 编码）
+ *   - salt: 32 字节随机盐
+ *   - iv:   16 字节初始化向量
+ *   - 剩余: AES-GCM 加密结果（密文 + 16 字节 auth tag 自动附加）
  */
 
-import crypto from 'node:crypto'
-
-const ALGORITHM = 'aes-256-gcm'
+const ALGORITHM = 'AES-GCM'
 const IV_LENGTH = 16
-const AUTH_TAG_LENGTH = 16
 const SALT_LENGTH = 32
 const KEY_LENGTH = 32
-const ITERATIONS = 100000
-const DIGEST = 'sha256'
+const ITERATIONS = 100_000
+const HASH = 'SHA-256'
+const AUTH_TAG_LENGTH = 16 // GCM 标准认证标签长度
 
 /**
- * 从密码派生加密密钥
+ * 从密码派生加密密钥（PBKDF2）
  */
-function deriveKey(password: string, salt: Buffer): Buffer {
-  return crypto.pbkdf2Sync(password, salt, ITERATIONS, KEY_LENGTH, DIGEST)
+async function deriveKey(password: string, salt: Uint8Array): Promise<CryptoKey> {
+  const encoder = new TextEncoder()
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(password),
+    'PBKDF2',
+    false,
+    ['deriveBits', 'deriveKey'],
+  )
+
+  return crypto.subtle.deriveKey(
+    {
+      name: 'PBKDF2',
+      salt,
+      iterations: ITERATIONS,
+      hash: HASH,
+    },
+    keyMaterial,
+    { name: ALGORITHM, length: KEY_LENGTH * 8 },
+    false,
+    ['encrypt', 'decrypt'],
+  )
 }
 
 /**
  * 加密文本
  * @param text - 明文
  * @param password - 加密密码
- * @returns Base64 编码的密文（格式：salt + iv + authTag + encrypted）
+ * @returns Base64 编码的密文（格式：salt + iv + ciphertext+tag）
  */
-export function encrypt(text: string, password: string): string {
-  const salt = crypto.randomBytes(SALT_LENGTH)
-  const key = deriveKey(password, salt)
-  const iv = crypto.randomBytes(IV_LENGTH)
+export async function encrypt(text: string, password: string): Promise<string> {
+  const encoder = new TextEncoder()
 
-  const cipher = crypto.createCipheriv(ALGORITHM, key, iv)
-  const encrypted = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()])
-  const authTag = cipher.getAuthTag()
+  const salt = crypto.getRandomValues(new Uint8Array(SALT_LENGTH))
+  const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH))
+  const key = await deriveKey(password, salt)
 
-  // salt + iv + authTag + encrypted
-  const result = Buffer.concat([salt, iv, authTag, encrypted])
-  return result.toString('base64')
+  const encrypted = await crypto.subtle.encrypt(
+    { name: ALGORITHM, iv },
+    key,
+    encoder.encode(text),
+  )
+
+  // 合并：salt(32) + iv(16) + ciphertext+tag(variable)
+  const result = new Uint8Array(SALT_LENGTH + IV_LENGTH + encrypted.byteLength)
+  result.set(salt, 0)
+  result.set(iv, SALT_LENGTH)
+  result.set(new Uint8Array(encrypted), SALT_LENGTH + IV_LENGTH)
+
+  return btoa(String.fromCharCode(...result))
 }
 
 /**
@@ -48,22 +79,23 @@ export function encrypt(text: string, password: string): string {
  * @param password - 解密密码
  * @returns 明文
  */
-export function decrypt(encryptedText: string, password: string): string {
-  const buffer = Buffer.from(encryptedText, 'base64')
+export async function decrypt(encryptedText: string, password: string): Promise<string> {
+  const decoder = new TextDecoder()
 
-  const salt = buffer.subarray(0, SALT_LENGTH)
-  const iv = buffer.subarray(SALT_LENGTH, SALT_LENGTH + IV_LENGTH)
-  const authTag = buffer.subarray(
-    SALT_LENGTH + IV_LENGTH,
-    SALT_LENGTH + IV_LENGTH + AUTH_TAG_LENGTH,
+  // Base64 → Uint8Array
+  const raw = Uint8Array.from(atob(encryptedText), (c) => c.charCodeAt(0))
+
+  const salt = raw.slice(0, SALT_LENGTH)
+  const iv = raw.slice(SALT_LENGTH, SALT_LENGTH + IV_LENGTH)
+  const ciphertext = raw.slice(SALT_LENGTH + IV_LENGTH)
+
+  const key = await deriveKey(password, salt)
+
+  const decrypted = await crypto.subtle.decrypt(
+    { name: ALGORITHM, iv },
+    key,
+    ciphertext,
   )
-  const encrypted = buffer.subarray(SALT_LENGTH + IV_LENGTH + AUTH_TAG_LENGTH)
 
-  const key = deriveKey(password, salt)
-
-  const decipher = crypto.createDecipheriv(ALGORITHM, key, iv)
-  decipher.setAuthTag(authTag)
-
-  const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()])
-  return decrypted.toString('utf8')
+  return decoder.decode(decrypted)
 }

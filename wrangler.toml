@@ -1,0 +1,19 @@
+# Cloudflare Pages + Workers 配置
+# 部署前需要在 Cloudflare Dashboard 创建以下资源：
+#   1. KV namespace: RANKING_CACHE（排行榜缓存）
+#   2. KV namespace: BILIBILI_STORE（Cookie 加密存储）
+# 然后将对应的 id 填入下方。
+
+name = "bilibili-rank-vue"
+compatibility_date = "2025-07-01"
+compatibility_flags = ["nodejs_compat"]
+
+# KV 命名空间绑定（创建后从 Cloudflare Dashboard 获取 id）
+# 也可以通过 Dashboard → Pages → Settings → Bindings 手动添加，无需此文件
+[[kv_namespaces]]
+binding = "RANKING_CACHE"
+id = "b1ef1cac82bb44fd81727cc2dd5264fe"
+
+[[kv_namespaces]]
+binding = "BILIBILI_STORE"
+id = "68c4f8abec1f4db3be06b4da1372792f"

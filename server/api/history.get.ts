@@ -30,7 +30,7 @@ export default defineEventHandler(async (event) => {
 
   // 3. 解密 Cookie
   const config = useRuntimeConfig()
-  const bilibiliCookie = decrypt(encrypted, config.encryptKey)
+  const bilibiliCookie = await decrypt(encrypted, config.encryptKey)
 
   // 4. 解析分页参数
   const query = getQuery(event)

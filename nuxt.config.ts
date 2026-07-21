@@ -24,16 +24,40 @@ export default defineNuxtConfig({
 
   // Nitro server config
   nitro: {
-    // 部署预设：node-server（可改为 vercel, cloudflare-pages, netlify 等）
-    preset: 'node-server',
+    // 部署预设：Cloudflare Pages
+    preset: 'cloudflare_pages',
+
+    // 实验性功能：定时任务
+    experimental: {
+      tasks: true,
+    },
+    // 定时任务：每周日清除 Banner 缓存
+    scheduledTasks: {
+      '0 0 * * 0': ['refresh-banners'],
+    },
+
     storage: {
-      // Cache storage (memory in dev, can use Redis in production)
+      // 排行榜缓存（5 分钟 TTL）— Cloudflare KV
       cache: {
-        driver: 'memory',
+        driver: 'cloudflare-kv-binding',
+        binding: 'RANKING_CACHE',
       },
-      // Cookie storage (must be persistent in production)
+      // Cookie 加密存储 — Cloudflare KV
       bilibili: {
-        driver: 'memory', // 生产环境建议使用 Redis: { driver: 'redis', host: '...' }
+        driver: 'cloudflare-kv-binding',
+        binding: 'BILIBILI_STORE',
+      },
+    },
+
+    // 本地开发时回退到文件系统
+    devStorage: {
+      cache: {
+        driver: 'fs',
+        base: './.nitro/data/cache',
+      },
+      bilibili: {
+        driver: 'fs',
+        base: './.nitro/data/bilibili',
       },
     },
   },
