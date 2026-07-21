@@ -79,38 +79,30 @@ export default defineEventHandler(async (event) => {
 
   // 4. 逐个获取视频详情
   const results: VideosDataMap = {}
-  const maxResults = Math.min(merged.length, 200) // 最多 200 条
+  const maxResults = Math.min(merged.length, 200)
+
+  let diagOk = 0, diagOnlineZero = 0, diagViewZero = 0, diagBothZero = 0
 
   for (let i = 0; i < maxResults; i += 5) {
     const batch = merged.slice(i, i + 5)
     const batchResults = await Promise.allSettled(
-	      batch.map(async (video) => {
-	        const cid = typeof video.cid === 'number' ? String(video.cid) : '0'
+      batch.map(async (video) => {
+        const cid = typeof video.cid === 'number' ? String(video.cid) : '0'
 
-	        // 并行请求在线人数 + 视频统计
-	        let [onlineCount, stats] = await Promise.all([
-	          withTimeout(
-	            getBilibiliOnlineCount(video.bvid, cid),
-	            apiTimeout,
-	            { formatted: '0', raw: 0 },
-	          ),
-	          withTimeout(
-	            getBilibiliVideoStats(video.bvid),
-	            apiTimeout,
-	            { playCountNum: 0, danmakuCountNum: 0, playCount: '0', danmakuCount: '0', cid: 0 },
-	          ),
-	        ])
+        const [onlineCount, stats] = await Promise.all([
+          withTimeout(
+            getBilibiliOnlineCount(video.bvid, cid),
+            apiTimeout,
+            { formatted: '0', raw: 0 },
+          ),
+          withTimeout(
+            getBilibiliVideoStats(video.bvid),
+            apiTimeout,
+            { playCountNum: 0, danmakuCountNum: 0, playCount: '0', danmakuCount: '0', cid: 0 },
+          ),
+        ])
 
-	        // 如果在线人数为 0 且排行榜 cid 无效，用 view 返回的真实 cid 重试一次
-	        if (onlineCount.raw === 0 && stats.cid > 0 && (cid === '0' || cid === 'undefined')) {
-	          onlineCount = await withTimeout(
-	            getBilibiliOnlineCount(video.bvid, String(stats.cid)),
-	            apiTimeout,
-	            { formatted: '0', raw: 0 },
-	          )
-	        }
-
-	        return {
+        return {
           bvid: video.bvid,
           data: {
             title: video.title || '',
@@ -130,17 +122,28 @@ export default defineEventHandler(async (event) => {
 
     for (const result of batchResults) {
       if (result.status === 'fulfilled') {
+        const v = result.value
+        const onlineOk = v.data.count_num > 0
+        const viewOk = v.data.play_count_num > 0
+        if (onlineOk && viewOk) diagOk++
+        else if (!onlineOk && !viewOk) diagBothZero++
+        else if (!onlineOk) diagOnlineZero++
+        else diagViewZero++
         results[result.value.bvid] = result.value.data
       }
     }
   }
 
-  // 5. 写入缓存（即使完全空也缓存，避免每次请求都等待）
+  // 写入缓存
   await useStorage('cache').setItem(cacheKey, {
     data: results,
     timestamp: Date.now(),
   })
 
+  const batchCount = Math.ceil(maxResults / 5)
+  console.log(`[ranking] merged=${merged.length} max=${maxResults} batches=${batchCount} ok=${diagOk} onlineZero=${diagOnlineZero} viewZero=${diagViewZero} bothZero=${diagBothZero}`)
+
   setResponseHeader(event, 'X-Cache', 'MISS')
+  setResponseHeader(event, 'X-Diag', `ok=${diagOk} onlineZero=${diagOnlineZero} viewZero=${diagViewZero} bothZero=${diagBothZero}`)
   return results
 })
