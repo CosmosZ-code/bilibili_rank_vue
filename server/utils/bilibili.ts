@@ -76,7 +76,8 @@ async function fetchWbiKeys(): Promise<{ imgKey: string; subKey: string }> {
         return { imgKey, subKey }
       }
     }
-  } catch {
+  } catch (err: any) {
+    console.warn('[bilibili] fetchWbiKeys 失败:', err?.message || err)
     // nav 接口偶尔失败，使用空密钥（部分接口可以不签名）
   }
 
@@ -264,20 +265,27 @@ export async function bilibiliRequest<T>(
     }
   }
 
-  const response = await $fetch<BilibiliResponse<T>>(url.toString(), {
-    headers,
-    method: options?.method || 'GET',
-    timeout: 8000,
-  })
-
-  if (response.code !== 0) {
-    throw createError({
-      statusCode: 502,
-      statusMessage: `B站API错误 [${response.code}]: ${response.message}`,
+  try {
+    const response = await $fetch<BilibiliResponse<T>>(url.toString(), {
+      headers,
+      method: options?.method || 'GET',
+      timeout: 8000,
     })
-  }
 
-  return response
+    if (response.code !== 0) {
+      console.error(`[bilibili] API 错误 ${path}: code=${response.code} message=${response.message}`)
+      throw createError({
+        statusCode: 502,
+        statusMessage: `B站API错误 [${response.code}]: ${response.message}`,
+      })
+    }
+
+    return response
+  } catch (err: any) {
+    if (err.statusCode === 502) throw err // 重新抛出已处理的 B站业务错误
+    console.error(`[bilibili] 请求失败 ${path}:`, err?.message || err)
+    throw err
+  }
 }
 
 // ============================================================

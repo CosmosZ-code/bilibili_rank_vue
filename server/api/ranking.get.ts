@@ -49,8 +49,22 @@ export default defineEventHandler(async (event) => {
 
   // 2. 并发请求排行榜 + 热门（带超时）
   const [ranking, popular] = await Promise.all([
-    withTimeout(getBilibiliRanking().catch(() => []), apiTimeout, []),
-    withTimeout(getBilibiliPopular(2).catch(() => []), apiTimeout, []),
+    withTimeout(
+      getBilibiliRanking().catch((err) => {
+        console.error('[ranking] 排行榜 API 失败:', err?.message || err)
+        return []
+      }),
+      apiTimeout,
+      [],
+    ),
+    withTimeout(
+      getBilibiliPopular(2).catch((err) => {
+        console.error('[ranking] 热门 API 失败:', err?.message || err)
+        return []
+      }),
+      apiTimeout,
+      [],
+    ),
   ])
 
   // 3. 合并 + 去重
