@@ -417,10 +417,12 @@ export async function getBilibiliVideoStats(bvid: string): Promise<{
   danmakuCountNum: number
   playCount: string
   danmakuCount: string
+  cid: number
 }> {
   try {
     const response = await bilibiliRequest<{
       stat?: { view: number; danmaku: number }
+      cid?: number
     }>('/x/web-interface/view', {
       params: { bvid },
       wbiSign: false, // /x/web-interface/view 是公开接口，不需要 WBI 签名
@@ -435,6 +437,7 @@ export async function getBilibiliVideoStats(bvid: string): Promise<{
       danmakuCountNum: danmaku,
       playCount: formatCount(play),
       danmakuCount: formatCount(danmaku),
+      cid: response.data?.cid || 0,
     }
   } catch (err: any) {
     console.warn(`[getBilibiliVideoStats] 获取视频 ${bvid} 数据失败:`, err.message || err)
@@ -443,6 +446,7 @@ export async function getBilibiliVideoStats(bvid: string): Promise<{
       danmakuCountNum: 0,
       playCount: '0',
       danmakuCount: '0',
+      cid: 0,
     }
   }
 }
