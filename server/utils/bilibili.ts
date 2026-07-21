@@ -497,6 +497,49 @@ export async function fetchBilibiliFavorites(
 }
 
 // ============================================================
+// 批量查询（减少 Workers 子请求次数）
+// ============================================================
+
+/**
+ * 批量获取视频详情（在线人数 + 播放量/弹幕）
+ *
+ * 通过代理的 /proxy-batch 接口一次查询多个 BV 号，
+ * 避免 Cloudflare Workers 50 次子请求限制。
+ */
+export async function getBatchDetails(
+  bvids: string[],
+): Promise<
+  Record<string, {
+    online: { formatted: string; raw: number }
+    stats: { playCountNum: number; danmakuCountNum: number; playCount: string; danmakuCount: string; cid: number }
+  }>
+> {
+  if (bvids.length === 0) return {}
+
+  const baseUrl = getApiBase()
+  const url = new URL('/proxy-batch', baseUrl).toString()
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...getProxyHeaders(),
+  }
+
+  try {
+    const result = await $fetch<Record<string, any>>(url, {
+      method: 'POST',
+      headers,
+      body: { bvids },
+      timeout: 15_000,
+    })
+    return result || {}
+  } catch {
+    // 批量接口不可用时返回空（调用方应 fallback 到单个请求）
+    console.warn('[getBatchDetails] /proxy-batch 请求失败，请确认代理已更新')
+    return {}
+  }
+}
+
+// ============================================================
 // 工具函数
 // ============================================================
 

@@ -9,8 +9,7 @@ import type { CacheEntry, VideosDataMap } from '../../app/types'
 import {
   getBilibiliRanking,
   getBilibiliPopular,
-  getBilibiliOnlineCount,
-  getBilibiliVideoStats,
+  getBatchDetails,
   ensureHttps,
   dedupByBvid,
 } from '../utils/bilibili'
@@ -85,51 +84,33 @@ export default defineEventHandler(async (event) => {
 
   for (let i = 0; i < maxResults; i += 5) {
     const batch = merged.slice(i, i + 5)
-    const batchResults = await Promise.allSettled(
-      batch.map(async (video) => {
-        const cid = typeof video.cid === 'number' ? String(video.cid) : '0'
+    const bvids = batch.map((v) => v.bvid)
 
-        const [onlineCount, stats] = await Promise.all([
-          withTimeout(
-            getBilibiliOnlineCount(video.bvid, cid),
-            apiTimeout,
-            { formatted: '0', raw: 0 },
-          ),
-          withTimeout(
-            getBilibiliVideoStats(video.bvid),
-            apiTimeout,
-            { playCountNum: 0, danmakuCountNum: 0, playCount: '0', danmakuCount: '0', cid: 0 },
-          ),
-        ])
+    // 一次请求查询整批（绕开 Workers 50 子请求限制）
+    const batchData = await getBatchDetails(bvids)
 
-        return {
-          bvid: video.bvid,
-          data: {
-            title: video.title || '',
-            owner: video.owner?.name || '',
-            mid: String(video.owner?.mid || ''),
-            pic: ensureHttps(video.pic || ''),
-            online_count: onlineCount.formatted,
-            count_num: onlineCount.raw,
-            play_count_num: stats.playCountNum,
-            danmaku_count_num: stats.danmakuCountNum,
-            play_count: stats.playCount,
-            danmaku_count: stats.danmakuCount,
-          },
-        }
-      }),
-    )
-
-    for (const result of batchResults) {
-      if (result.status === 'fulfilled') {
-        const v = result.value
-        const onlineOk = v.data.count_num > 0
-        const viewOk = v.data.play_count_num > 0
+    for (const video of batch) {
+      const detail = batchData[video.bvid]
+      if (detail) {
+        const onlineOk = detail.online.raw > 0
+        const viewOk = detail.stats.playCountNum > 0
         if (onlineOk && viewOk) diagOk++
         else if (!onlineOk && !viewOk) diagBothZero++
         else if (!onlineOk) diagOnlineZero++
         else diagViewZero++
-        results[result.value.bvid] = result.value.data
+
+        results[video.bvid] = {
+          title: video.title || '',
+          owner: video.owner?.name || '',
+          mid: String(video.owner?.mid || ''),
+          pic: ensureHttps(video.pic || ''),
+          online_count: detail.online.formatted,
+          count_num: detail.online.raw,
+          play_count_num: detail.stats.playCountNum,
+          danmaku_count_num: detail.stats.danmakuCountNum,
+          play_count: detail.stats.playCount,
+          danmaku_count: detail.stats.danmakuCount,
+        }
       }
     }
   }
