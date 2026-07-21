@@ -15,7 +15,30 @@
 
 import type { BilibiliResponse } from '../../app/types'
 
-const BILIBILI_API_BASE = 'https://api.bilibili.com'
+/**
+ * 获取 B站 API 基础 URL
+ *
+ * 优先使用代理地址（国内 VPS），否则直连。
+ * 代理 URL 通过 NUXT_PROXY_URL 环境变量配置。
+ */
+function getApiBase(): string {
+  const config = useRuntimeConfig()
+  if (config.proxy?.url) {
+    return config.proxy.url
+  }
+  return 'https://api.bilibili.com'
+}
+
+/**
+ * 获取代理认证头（如果配置了代理）
+ */
+function getProxyHeaders(): Record<string, string> {
+  const config = useRuntimeConfig()
+  if (config.proxy?.url && config.proxy?.authKey) {
+    return { 'X-Proxy-Auth': config.proxy.authKey }
+  }
+  return {}
+}
 
 const DEFAULT_HEADERS: Record<string, string> = {
   'User-Agent':
@@ -240,7 +263,7 @@ export async function bilibiliRequest<T>(
     wbiSign?: boolean // 是否启用 WBI 签名
   },
 ): Promise<BilibiliResponse<T>> {
-  const headers: Record<string, string> = { ...DEFAULT_HEADERS }
+  const headers: Record<string, string> = { ...DEFAULT_HEADERS, ...getProxyHeaders() }
 
   if (options?.cookie) {
     headers['Cookie'] = options.cookie
@@ -257,7 +280,7 @@ export async function bilibiliRequest<T>(
     }
   }
 
-  const url = new URL(path, BILIBILI_API_BASE)
+  const url = new URL(path, getApiBase())
 
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined && value !== null) {

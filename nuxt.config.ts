@@ -20,6 +20,12 @@ export default defineNuxtConfig({
       apiBase: 'https://api.bilibili.com',
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     },
+    // 国内 VPS 代理（用于绕过 Cloudflare 海外 IP 限制访问 B站 API）
+    // 不配置时直连 B站；配置后所有 B站请求通过代理转发
+    proxy: {
+      url: '',
+      authKey: '',
+    },
   },
 
   // Nitro server config
