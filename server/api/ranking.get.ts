@@ -76,41 +76,36 @@ export default defineEventHandler(async (event) => {
     return MOCK_RANKING
   }
 
-  // 4. 逐个获取视频详情
+  // 4. 一次请求获取全部视频详情（绕开 Workers 50 子请求限制）
   const results: VideosDataMap = {}
   const maxResults = Math.min(merged.length, 200)
 
   let diagOk = 0, diagOnlineZero = 0, diagViewZero = 0, diagBothZero = 0
 
-  for (let i = 0; i < maxResults; i += 5) {
-    const batch = merged.slice(i, i + 5)
-    const bvids = batch.map((v) => v.bvid)
+  const allBvids = merged.slice(0, maxResults).map((v) => v.bvid)
+  const batchData = await getBatchDetails(allBvids)
 
-    // 一次请求查询整批（绕开 Workers 50 子请求限制）
-    const batchData = await getBatchDetails(bvids)
+  for (const video of merged.slice(0, maxResults)) {
+    const detail = batchData[video.bvid]
+    if (detail) {
+      const onlineOk = detail.online.raw > 0
+      const viewOk = detail.stats.playCountNum > 0
+      if (onlineOk && viewOk) diagOk++
+      else if (!onlineOk && !viewOk) diagBothZero++
+      else if (!onlineOk) diagOnlineZero++
+      else diagViewZero++
 
-    for (const video of batch) {
-      const detail = batchData[video.bvid]
-      if (detail) {
-        const onlineOk = detail.online.raw > 0
-        const viewOk = detail.stats.playCountNum > 0
-        if (onlineOk && viewOk) diagOk++
-        else if (!onlineOk && !viewOk) diagBothZero++
-        else if (!onlineOk) diagOnlineZero++
-        else diagViewZero++
-
-        results[video.bvid] = {
-          title: video.title || '',
-          owner: video.owner?.name || '',
-          mid: String(video.owner?.mid || ''),
-          pic: ensureHttps(video.pic || ''),
-          online_count: detail.online.formatted,
-          count_num: detail.online.raw,
-          play_count_num: detail.stats.playCountNum,
-          danmaku_count_num: detail.stats.danmakuCountNum,
-          play_count: detail.stats.playCount,
-          danmaku_count: detail.stats.danmakuCount,
-        }
+      results[video.bvid] = {
+        title: video.title || '',
+        owner: video.owner?.name || '',
+        mid: String(video.owner?.mid || ''),
+        pic: ensureHttps(video.pic || ''),
+        online_count: detail.online.formatted,
+        count_num: detail.online.raw,
+        play_count_num: detail.stats.playCountNum,
+        danmaku_count_num: detail.stats.danmakuCountNum,
+        play_count: detail.stats.playCount,
+        danmaku_count: detail.stats.danmakuCount,
       }
     }
   }
@@ -121,8 +116,7 @@ export default defineEventHandler(async (event) => {
     timestamp: Date.now(),
   })
 
-  const batchCount = Math.ceil(maxResults / 5)
-  console.log(`[ranking] merged=${merged.length} max=${maxResults} batches=${batchCount} ok=${diagOk} onlineZero=${diagOnlineZero} viewZero=${diagViewZero} bothZero=${diagBothZero}`)
+  console.log(`[ranking] merged=${merged.length} max=${maxResults} ok=${diagOk} onlineZero=${diagOnlineZero} viewZero=${diagViewZero} bothZero=${diagBothZero}`)
 
   setResponseHeader(event, 'X-Cache', 'MISS')
   setResponseHeader(event, 'X-Diag', `ok=${diagOk} onlineZero=${diagOnlineZero} viewZero=${diagViewZero} bothZero=${diagBothZero}`)

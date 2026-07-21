@@ -529,7 +529,7 @@ export async function getBatchDetails(
       method: 'POST',
       headers,
       body: { bvids },
-      timeout: 15_000,
+      timeout: 30_000,
     })
     return result || {}
   } catch {
