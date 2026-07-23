@@ -381,6 +381,192 @@ export async function fetchBilibiliFavorites(
 }
 
 // ============================================================
+// 扫码登录相关
+// ============================================================
+
+const PASSPORT_BASE = 'https://passport.bilibili.com'
+
+/** 二维码申请返回 */
+export interface QrCodeResult {
+  url: string
+  qrcode_key: string
+}
+
+/** 扫码轮询状态码 */
+export type QrPollStatus = 'pending' | 'scanned' | 'expired' | 'success'
+
+/** 扫码轮询返回 */
+export interface QrPollResult {
+  status: QrPollStatus
+  /** 登录成功时返回的完整 Cookie 字符串 */
+  cookie?: string
+  /** 登录成功时返回的 refresh_token */
+  refreshToken?: string
+  /** 原始 data.code */
+  rawCode: number
+  /** 原始 message */
+  message: string
+}
+
+/** 用户信息（从 /x/web-interface/nav 获取） */
+export interface BilibiliUserInfo {
+  mid: number
+  uname: string
+  face: string
+  isLogin: boolean
+}
+
+/**
+ * 申请 B站 Web 扫码登录二维码
+ *
+ * API: GET https://passport.bilibili.com/x/passport-login/web/qrcode/generate
+ * 返回二维码 URL 和 qrcode_key（密钥有效期 180 秒）
+ */
+export async function generateQrCode(): Promise<QrCodeResult> {
+  const response = await $fetch<{
+    code: number
+    message: string
+    data: { url: string; qrcode_key: string }
+  }>(`${PASSPORT_BASE}/x/passport-login/web/qrcode/generate`, {
+    headers: DEFAULT_HEADERS,
+    timeout: 8000,
+  })
+
+  if (response.code !== 0) {
+    throw createError({
+      statusCode: 502,
+      statusMessage: `B站二维码生成失败 [${response.code}]: ${response.message}`,
+    })
+  }
+
+  return {
+    url: response.data.url,
+    qrcode_key: response.data.qrcode_key,
+  }
+}
+
+/**
+ * 轮询 B站 扫码登录状态
+ *
+ * API: GET https://passport.bilibili.com/x/passport-login/web/qrcode/poll
+ *
+ * 状态码说明：
+ * - 86101: 未扫码 → pending
+ * - 86090: 已扫码未确认 → scanned
+ * - 86038: 二维码已失效 → expired
+ * - 0: 登录成功 → success（同时返回 Set-Cookie 和 refresh_token）
+ *
+ * @param qrcodeKey - 二维码密钥
+ * @returns 轮询结果（含 cookie 和 refresh_token 如果登录成功）
+ */
+export async function pollQrCode(qrcodeKey: string): Promise<QrPollResult> {
+  // 使用原始 fetch 以获取 Set-Cookie 响应头
+  const url = `${PASSPORT_BASE}/x/passport-login/web/qrcode/poll?qrcode_key=${encodeURIComponent(qrcodeKey)}`
+
+  const response = await fetch(url, {
+    headers: DEFAULT_HEADERS,
+  })
+
+  if (!response.ok) {
+    throw createError({
+      statusCode: 502,
+      statusMessage: `B站扫码轮询失败: HTTP ${response.status}`,
+    })
+  }
+
+  const body = await response.json() as {
+    code: number
+    message: string
+    data: {
+      code: number
+      message: string
+      refresh_token?: string
+      url?: string
+    }
+  }
+
+  const dataCode = body.data?.code
+  const message = body.data?.message || body.message || ''
+
+  // 解析状态码
+  let status: QrPollStatus
+  switch (dataCode) {
+    case 0:
+      status = 'success'
+      break
+    case 86090:
+      status = 'scanned'
+      break
+    case 86038:
+      status = 'expired'
+      break
+    case 86101:
+    default:
+      status = 'pending'
+      break
+  }
+
+  const result: QrPollResult = {
+    status,
+    rawCode: dataCode,
+    message,
+  }
+
+  // 登录成功时，提取 Set-Cookie 和 refresh_token
+  if (status === 'success') {
+    // 从 Set-Cookie 响应头提取完整 Cookie 字符串
+    const setCookieHeaders = response.headers.getSetCookie?.() || []
+    if (setCookieHeaders.length > 0) {
+      // 将 Set-Cookie 数组转换为 Cookie 字符串格式（key=value; key=value）
+      result.cookie = setCookieHeaders
+        .map((h) => h.split(';')[0]) // 取第一个分号前的 key=value
+        .join('; ')
+    }
+
+    // refresh_token 在响应体中
+    if (body.data?.refresh_token) {
+      result.refreshToken = body.data.refresh_token
+    }
+  }
+
+  return result
+}
+
+/**
+ * 获取 B站 当前登录用户信息
+ *
+ * API: GET https://api.bilibili.com/x/web-interface/nav
+ * 认证方式：仅可 Cookie (SESSDATA)
+ *
+ * @param cookie - B站 Cookie 字符串
+ * @returns 用户信息
+ */
+export async function getNavUserInfo(cookie: string): Promise<BilibiliUserInfo> {
+  try {
+    const response = await bilibiliRequest<{
+      isLogin: boolean
+      mid: number
+      uname: string
+      face: string
+    }>('/x/web-interface/nav', { cookie })
+
+    const data = response.data as any
+    return {
+      mid: data.mid || 0,
+      uname: data.uname || '',
+      face: data.face || '',
+      isLogin: data.isLogin || false,
+    }
+  } catch (err: any) {
+    // code=-101 表示账号未登录，这是正常状态而非错误
+    if (err.statusCode === 502 && err.statusMessage?.includes('-101')) {
+      return { mid: 0, uname: '', face: '', isLogin: false }
+    }
+    throw err
+  }
+}
+
+// ============================================================
 // 工具函数
 // ============================================================
 

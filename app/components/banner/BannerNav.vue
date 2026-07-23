@@ -16,10 +16,13 @@
       <li class="nav-item"><a href="//live.bilibili.com" class="nav-link"> 直播</a></li>
     </ul>
     <!-- 右侧导航 -->
-    <ul class="nav-menu nav-menu-right">
-      <li class="nav-item"><a href="//t.bilibili.com" class="nav-link">动态</a></li>
-      <li class="nav-item"><a href="//www.bilibili.com/history" class="nav-link">历史</a></li>
-    </ul>
+    <div class="nav-right">
+      <ul class="nav-menu nav-menu-right">
+        <li class="nav-item"><a href="//t.bilibili.com" class="nav-link">动态</a></li>
+        <li class="nav-item"><a href="//www.bilibili.com/history" class="nav-link">历史</a></li>
+      </ul>
+      <BilibiliLogin />
+    </div>
   </nav>
 </template>
 
@@ -81,8 +84,13 @@ const navStyle = {
   height: 1em;
 }
 
-.nav-menu-right {
+.nav-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
   margin-left: auto;
-  margin-right: 150px;
+}
+
+.nav-menu-right {
 }
 </style>

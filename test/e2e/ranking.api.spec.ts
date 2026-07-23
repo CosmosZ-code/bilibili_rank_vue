@@ -59,23 +59,6 @@ describe('API 端点 HTTP 响应', async () => {
     expect(data.length).toBeGreaterThan(0)
   })
 
-  it('POST /api/cookie 缺少参数返回 400', async () => {
-    try {
-      await $fetch('/api/cookie', { method: 'POST', body: {} })
-      expect.unreachable('应抛出 400 错误')
-    } catch (err: any) {
-      expect(err.statusCode || err.response?.status).toBe(400)
-    }
-  })
-
-  it('POST /api/cookie 正常提交返回 200', async () => {
-    const data = await $fetch('/api/cookie', {
-      method: 'POST',
-      body: { cookie: 'SESSDATA=test; bili_jct=test' },
-    })
-    expect(data).toEqual({ ok: true })
-  })
-
   it('GET /api/history 无 Cookie 返回 401', async () => {
     try {
       await $fetch('/api/history')

@@ -24,6 +24,8 @@ export default defineNuxtConfig({
     cacheWarmer: {
       refreshIntervalMs: Number(process.env.NUXT_CACHE_WARMER_REFRESH_INTERVAL_MS) || 4 * 60 * 1000,
     },
+    // SQLite 数据库文件路径（默认：项目根目录 data/bilibili_rank.db）
+    dbPath: process.env.NUXT_DB_PATH || './data/bilibili_rank.db',
   },
 
   // Nitro server config
@@ -35,11 +37,12 @@ export default defineNuxtConfig({
       cache: {
         driver: 'memory',
       },
-      // Cookie storage (must be persistent in production)
-      bilibili: {
-        driver: 'memory', // 生产环境建议使用 Redis: { driver: 'redis', host: '...' }
-      },
     },
+    // 复制 sql.js WASM 文件到构建输出（用于 SQLite）
+    serverAssets: [{
+      baseName: 'sql-wasm',
+      dir: 'node_modules/sql.js/dist',
+    }],
   },
 
   // UnoCSS config
