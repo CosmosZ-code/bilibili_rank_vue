@@ -48,10 +48,10 @@ describe('index.vue 页面内容验证', () => {
     }
   })
 
-  it('使用 useAsyncData 获取数据 + useScrollToTop', async () => {
+  it('使用 useFetch 获取数据 + useScrollToTop', async () => {
     const fs = await import('node:fs/promises')
     const content = await fs.readFile(resolve(rootDir, 'app/pages/index.vue'), 'utf-8')
-    expect(content).toContain('useAsyncData')
+    expect(content).toContain('useFetch')
     expect(content).toContain('useScrollToTop')
   })
 
@@ -62,10 +62,10 @@ describe('index.vue 页面内容验证', () => {
     expect(content).toContain('bilibili')
   })
 
-  it('数据通过 useAsyncData 自动获取（SSR + CSR）', async () => {
+  it('数据通过 useFetch 自动获取（SSR + CSR）', async () => {
     const fs = await import('node:fs/promises')
     const content = await fs.readFile(resolve(rootDir, 'app/pages/index.vue'), 'utf-8')
-    expect(content).toContain('useAsyncData')
+    expect(content).toContain('useFetch')
     expect(content).toContain('/api/ranking')
   })
 

@@ -1,0 +1,53 @@
+# Nuxt dev/build outputs
+.output
+.data
+.nuxt
+.nitro
+.cache
+# dist (commented out — dist/assets contains banner data needed at runtime)
+
+# Node dependencies
+node_modules
+
+# Logs
+logs
+*.log
+
+# Misc
+.DS_Store
+.fleet
+.idea
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Tests
+test/
+vitest.config.ts
+
+# Scripts (not needed at runtime)
+scripts/
+
+# IDE / editor config
+.vscode/
+*.swp
+*.swo
+*~
+
+# Docs (keep README.md if needed, skip design docs)
+Nuxt3重构设计文档.md
+AGENTS.md
+.zcode/
+
+# Environment (will be injected at runtime)
+.env
+.env.*
+!.env.example
+
+# Docker files (self-referential)
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose.yaml

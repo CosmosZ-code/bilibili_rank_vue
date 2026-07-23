@@ -20,6 +20,10 @@ export default defineNuxtConfig({
       apiBase: 'https://api.bilibili.com',
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     },
+    // 排行榜缓存刷新间隔（毫秒），默认 4 分钟（env: NUXT_CACHE_WARMER_REFRESH_INTERVAL_MS）
+    cacheWarmer: {
+      refreshIntervalMs: Number(process.env.NUXT_CACHE_WARMER_REFRESH_INTERVAL_MS) || 4 * 60 * 1000,
+    },
   },
 
   // Nitro server config

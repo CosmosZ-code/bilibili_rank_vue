@@ -18,16 +18,32 @@ export function useScrollToTop(scrollThreshold: number = 300) {
 
   /**
    * 滚动到顶部 + 刷新数据
+   *
+   * 流程：平滑滚动到顶 → 等滚动结束 → 刷新数据 → 等 DOM 更新 → 再次锚定顶部
+   * 避免移动端因骨架屏/卡片高度变化导致布局抖动触发下拉刷新
    */
   function scrollToTop(refreshCallback?: () => void) {
     if (typeof window !== 'undefined') {
-      window.scrollTo({
-        top: 0,
-        behavior: 'smooth',
-      })
-    }
-    // 可选：触发数据刷新
-    if (refreshCallback) {
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+
+      const doRefresh = () => {
+        if (refreshCallback) {
+          refreshCallback()
+          // 数据刷新后 DOM 会更新（骨架屏 ↔ 真实卡片），
+          // 等 Vue 完成渲染后再次确保滚动位置在顶部
+          nextTick(() => {
+            window.scrollTo({ top: 0, behavior: 'instant' })
+          })
+        }
+      }
+
+      if ('onscrollend' in window) {
+        window.addEventListener('scrollend', doRefresh, { once: true })
+      } else {
+        // 移动端平滑滚动可能超过 500ms，降级延迟给到 1000ms
+        setTimeout(doRefresh, 1000)
+      }
+    } else if (refreshCallback) {
       refreshCallback()
     }
   }

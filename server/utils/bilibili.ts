@@ -229,17 +229,22 @@ export async function getBilibiliPopular(pages: number = 4): Promise<RankingVide
   const results: RankingVideo[] = []
 
   for (let pn = 1; pn <= pages; pn++) {
-    const response = await bilibiliRequest<{ list: RankingVideo[] }>(
-      '/x/web-interface/popular',
-      {
-        params: { pn: String(pn), ps: '50' },
-      },
-    )
-    const data = response.data as any
-    const list = data.list || data || []
-    results.push(...list)
+    try {
+      const response = await bilibiliRequest<{ list: RankingVideo[] }>(
+        '/x/web-interface/popular',
+        {
+          params: { pn: String(pn), ps: '50' },
+        },
+      )
+      const data = response.data as any
+      const list = data.list || data || []
+      results.push(...list)
 
-    if (list.length < 50) break
+      if (list.length < 50) break
+    } catch (err: any) {
+      // 单页失败不中断其他页的请求
+      console.warn(`[getBilibiliPopular] 第 ${pn} 页请求失败:`, err.message || err)
+    }
   }
 
   return results
@@ -270,10 +275,10 @@ export async function getBilibiliOnlineCount(
     )
 
 	    const total = response.data?.total || response.data?.count || '0'
-	    const raw = parseInt(String(total).replace(/[^0-9]/g, ''), 10) || 0
+	    const { value: raw, hasPlus } = parseChineseNumber(String(total))
 
 	    // 观看人数 >= 1000 时追加 "+" 后缀，表示"超过"
-	    const formatted = formatCount(raw) + (raw >= 1000 ? '+' : '')
+	    const formatted = formatCount(raw) + (hasPlus || raw >= 1000 ? '+' : '')
 
 	    return { formatted, raw }
   } catch {
@@ -282,42 +287,50 @@ export async function getBilibiliOnlineCount(
 }
 
 /**
- * 获取视频播放量和弹幕数
+ * 获取视频元数据（播放量、弹幕数、封面链接）
  *
  * API: GET /x/web-interface/view
  * 参数: bvid
+ *
+ * 注意：该接口批量请求会被 B站封锁，仅供逐个重试少量失败视频使用。
  */
 export async function getBilibiliVideoStats(bvid: string): Promise<{
   playCountNum: number
   danmakuCountNum: number
   playCount: string
   danmakuCount: string
+  pic: string
 }> {
   try {
     const response = await bilibiliRequest<{
       stat?: { view: number; danmaku: number }
+      pic?: string
     }>('/x/web-interface/view', {
       params: { bvid },
       wbiSign: false, // /x/web-interface/view 是公开接口，不需要 WBI 签名
     })
 
-    const stat = response.data?.stat
+    const data = response.data as any
+    const stat = data?.stat
     const play = stat?.view || 0
     const danmaku = stat?.danmaku || 0
+    const pic = ensureHttps(data?.pic || '')
 
     return {
       playCountNum: play,
       danmakuCountNum: danmaku,
       playCount: formatCount(play),
       danmakuCount: formatCount(danmaku),
+      pic,
     }
   } catch (err: any) {
-    console.warn(`[getBilibiliVideoStats] 获取视频 ${bvid} 数据失败:`, err.message || err)
+    console.warn(`[getBilibiliVideoStats] 获取视频 ${bvid} 元数据失败:`, err.message || err)
     return {
       playCountNum: 0,
       danmakuCountNum: 0,
       playCount: '0',
       danmakuCount: '0',
+      pic: '',
     }
   }
 }
@@ -382,6 +395,43 @@ export function formatCount(num: number): string {
     return (num / 10000).toFixed(1).replace(/\.0$/, '') + '万'
   }
   return String(num)
+}
+
+/**
+ * 解析中文数字字符串为原始数值
+ *
+ * 支持格式：
+ * - "1万+" → { value: 10000, hasPlus: true }
+ * - "2.3万" → { value: 23000, hasPlus: false }
+ * - "1.5亿" → { value: 150000000, hasPlus: false }
+ * - "999"   → { value: 999, hasPlus: false }
+ * - "1500+" → { value: 1500, hasPlus: true }
+ *
+ * @param str B站 API 返回的已格式化字符串
+ * @returns 解析后的数值和是否有 "+" 后缀
+ */
+export function parseChineseNumber(str: string): { value: number; hasPlus: boolean } {
+  const s = String(str).trim()
+  if (!s || s === '0') return { value: 0, hasPlus: false }
+
+  const hasPlus = s.endsWith('+')
+  const cleaned = s.replace(/\+$/, '')
+
+  // 亿
+  if (cleaned.includes('亿')) {
+    const num = parseFloat(cleaned.replace('亿', ''))
+    return { value: Math.round(num * 100000000), hasPlus }
+  }
+
+  // 万
+  if (cleaned.includes('万')) {
+    const num = parseFloat(cleaned.replace('万', ''))
+    return { value: Math.round(num * 10000), hasPlus }
+  }
+
+  // 普通数字
+  const num = parseInt(cleaned, 10)
+  return { value: Number.isNaN(num) ? 0 : num, hasPlus }
 }
 
 /**

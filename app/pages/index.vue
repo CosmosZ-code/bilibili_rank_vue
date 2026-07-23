@@ -58,18 +58,39 @@ const sortBy = ref<'count'>('count')
 const searchTerm = ref('')
 const purifyPercent = ref(10)
 
-const { data: videosData, pending: isLoading, error: fetchError } = useAsyncData<VideosDataMap>(
-  'ranking',
-  () => $fetch('/api/ranking'),
-  { server: true },
+// 非 lazy：SSR 阶段获取缓存时间戳（只读内存缓存，几乎无延迟）
+const { data: tsData } = await useAsyncData('ranking-timestamp', () =>
+  $fetch('/api/ranking/timestamp'),
+)
+
+const updateTime = ref(
+  tsData.value?.timestamp
+    ? new Date(tsData.value.timestamp).toLocaleString('zh-CN')
+    : '加载中...',
+)
+const lastDataTimestamp = ref(tsData.value?.timestamp ?? 0)
+
+// lazy：主数据不阻塞页面渲染
+const { data: videosData, pending: isLoading, error: fetchError } = useFetch<VideosDataMap>(
+  '/api/ranking',
+  {
+    key: 'ranking',
+    server: true,
+    lazy: true,
+    onResponse({ response }) {
+      const ts = response.headers.get('X-Data-Timestamp')
+      if (ts) {
+        lastDataTimestamp.value = Number(ts)
+        updateTime.value = new Date(Number(ts)).toLocaleString('zh-CN')
+      }
+    },
+  },
 )
 
 const error = computed(() => {
   if (fetchError.value) return (fetchError.value as any)?.message || '加载失败'
   return null
 })
-
-const updateTime = ref(new Date().toLocaleString('zh-CN'))
 
 const filteredVideos = computed(() => {
   const raw = videosData.value
@@ -111,7 +132,14 @@ const filteredVideos = computed(() => {
 const { showButton: showBackToTop, scrollToTop } = useScrollToTop(300)
 
 function onBackToTop() {
-  scrollToTop(() => {
+  scrollToTop(async () => {
+    // 检查数据是否已更新，时间戳相同则跳过刷新
+    try {
+      const { timestamp } = await $fetch('/api/ranking/timestamp')
+      if (timestamp && lastDataTimestamp.value && timestamp === lastDataTimestamp.value) {
+        return
+      }
+    } catch { /* 失败则照常刷新 */ }
     refreshNuxtData('ranking')
   })
 }

@@ -5,11 +5,12 @@
  * - getMixinKey: WBI 混排密钥生成
  * - signWbiParams: WBI 参数签名
  * - formatCount: 数字格式化
+ * - parseChineseNumber: 中文数字解析
  * - ensureHttps: URL 协议转换
  * - dedupByBvid: 去重逻辑
  */
 import { describe, it, expect } from 'vitest'
-import { formatCount, ensureHttps, dedupByBvid } from '../../server/utils/bilibili'
+import { formatCount, parseChineseNumber, ensureHttps, dedupByBvid } from '../../server/utils/bilibili'
 
 // 测试 WBI 签名相关的内部函数
 // getMixinKey 是模块内部函数，我们通过已知的输入/输出测试逻辑
@@ -170,6 +171,65 @@ describe('formatCount — 数字格式化', () => {
     expect(formatCount(1_2000)).toBe('1.2万')
     expect(formatCount(0)).toBe('0')
   })
+
+  it('处理非常大的数（Number.MAX_SAFE_INTEGER）', () => {
+    // 9 千万亿，远超亿级别
+    const huge = Number.MAX_SAFE_INTEGER // 9007199254740991
+    const result = formatCount(huge)
+    // 应格式化为亿单位
+    expect(result).toContain('亿')
+    expect(result).not.toBe('0')
+  })
+
+  it('处理负数（边界防御）', () => {
+    // 实际业务中不会传入负数，但函数应能处理
+    const result = formatCount(-1000)
+    // 当前实现会将 -1000 转为 "-1000"（小于 10000，原样返回）
+    expect(typeof result).toBe('string')
+  })
+})
+
+describe('parseChineseNumber — 中文数字解析', () => {
+  it('解析 "万" 单位', () => {
+    expect(parseChineseNumber('1万')).toEqual({ value: 10000, hasPlus: false })
+    expect(parseChineseNumber('2.3万')).toEqual({ value: 23000, hasPlus: false })
+    expect(parseChineseNumber('10万')).toEqual({ value: 100000, hasPlus: false })
+    expect(parseChineseNumber('9999万')).toEqual({ value: 99990000, hasPlus: false })
+  })
+
+  it('解析 "万+" 格式（B站常见返回）', () => {
+    expect(parseChineseNumber('1万+')).toEqual({ value: 10000, hasPlus: true })
+    expect(parseChineseNumber('2.3万+')).toEqual({ value: 23000, hasPlus: true })
+    expect(parseChineseNumber('10万+')).toEqual({ value: 100000, hasPlus: true })
+  })
+
+  it('解析 "亿" 单位', () => {
+    expect(parseChineseNumber('1亿')).toEqual({ value: 100000000, hasPlus: false })
+    expect(parseChineseNumber('1.5亿')).toEqual({ value: 150000000, hasPlus: false })
+    expect(parseChineseNumber('1.2亿')).toEqual({ value: 120000000, hasPlus: false })
+  })
+
+  it('解析 "亿+" 格式', () => {
+    expect(parseChineseNumber('1亿+')).toEqual({ value: 100000000, hasPlus: true })
+    expect(parseChineseNumber('1.5亿+')).toEqual({ value: 150000000, hasPlus: true })
+  })
+
+  it('解析普通数字（无单位）', () => {
+    expect(parseChineseNumber('0')).toEqual({ value: 0, hasPlus: false })
+    expect(parseChineseNumber('999')).toEqual({ value: 999, hasPlus: false })
+    expect(parseChineseNumber('1500')).toEqual({ value: 1500, hasPlus: false })
+  })
+
+  it('解析带 "+" 的普通数字', () => {
+    expect(parseChineseNumber('1500+')).toEqual({ value: 1500, hasPlus: true })
+    expect(parseChineseNumber('999+')).toEqual({ value: 999, hasPlus: true })
+  })
+
+  it('处理边界情况', () => {
+    expect(parseChineseNumber('')).toEqual({ value: 0, hasPlus: false })
+    expect(parseChineseNumber('   ')).toEqual({ value: 0, hasPlus: false })
+    expect(parseChineseNumber('abc')).toEqual({ value: 0, hasPlus: false })
+  })
 })
 
 describe('ensureHttps — HTTPS 协议转换', () => {
@@ -191,6 +251,13 @@ describe('ensureHttps — HTTPS 协议转换', () => {
     expect(ensureHttps(null)).toBe(null)
     // @ts-expect-error 测试边界情况
     expect(ensureHttps(undefined)).toBe(undefined)
+  })
+
+  it('协议相对 URL（//开头）保持不变', () => {
+    // 协议相对 URL 没有明确的 http:// 前缀，不应被替换
+    expect(ensureHttps('//i0.hdslb.com/bfs/archive/xxx.jpg')).toBe(
+      '//i0.hdslb.com/bfs/archive/xxx.jpg',
+    )
   })
 })
 
@@ -238,5 +305,18 @@ describe('dedupByBvid — BV 号去重', () => {
     const result = dedupByBvid(list)
     expect(result).toHaveLength(1)
     expect(result[0].title).toBe('First')
+  })
+
+  it('处理空 bvid 字符串的条目', () => {
+    const list = [
+      { bvid: '', title: 'Empty' },
+      { bvid: 'BV1xx', title: 'Valid' },
+      { bvid: '', title: 'Empty Duplicate' },
+    ]
+    const result = dedupByBvid(list)
+    // 空字符串也被视为有效 key，去重后保留第一个
+    expect(result).toHaveLength(2)
+    expect(result[0].title).toBe('Empty')
+    expect(result[1].title).toBe('Valid')
   })
 })
