@@ -62,6 +62,16 @@ export const refreshTokens = sqliteTable('refresh_tokens', {
 })
 
 // ============================================================
+// user_preferences — 用户偏好设置
+// ============================================================
+export const userPreferences = sqliteTable('user_preferences', {
+  userId: integer('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  purifyPercent: integer('purify_percent').notNull().default(10),
+})
+
+// ============================================================
 // sessions — 本地登录会话
 // ============================================================
 export const sessions = sqliteTable('sessions', {

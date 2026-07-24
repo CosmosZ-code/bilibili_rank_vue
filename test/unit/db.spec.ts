@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
 import { initDb, getDb, resetDb, saveDb, type Database } from '../../server/db'
-import { users, bilibiliCookies, refreshTokens, sessions } from '../../server/db/schema'
+import { users, bilibiliCookies, refreshTokens, sessions, userPreferences } from '../../server/db/schema'
 import { eq } from 'drizzle-orm'
 
 let db: Database
@@ -280,6 +280,44 @@ describe('sessions 表 CRUD', () => {
 
     const remaining = db.select().from(sessions).all()
     expect(remaining).toHaveLength(0)
+  })
+})
+
+describe('user_preferences 表 CRUD', () => {
+  let userId: number
+
+  beforeEach(() => {
+    db.delete(userPreferences).run()
+    db.delete(users).run()
+    const [row] = db.insert(users).values({
+      bilibiliUid: 'pref-test', bilibiliUname: 'Pref',
+    }).returning().all()
+    userId = row.id
+  })
+
+  it('默认值为 10', () => {
+    db.insert(userPreferences).values({ userId }).run()
+    const [r] = db.select().from(userPreferences).where(eq(userPreferences.userId, userId)).all()
+    expect(r!.purifyPercent).toBe(10)
+  })
+
+  it('可保存和读取', () => {
+    db.insert(userPreferences).values({ userId, purifyPercent: 50 }).run()
+    const [r] = db.select().from(userPreferences).where(eq(userPreferences.userId, userId)).all()
+    expect(r!.purifyPercent).toBe(50)
+  })
+
+  it('可更新', () => {
+    db.insert(userPreferences).values({ userId, purifyPercent: 20 }).run()
+    db.update(userPreferences).set({ purifyPercent: 80 }).where(eq(userPreferences.userId, userId)).run()
+    const [r] = db.select().from(userPreferences).where(eq(userPreferences.userId, userId)).all()
+    expect(r!.purifyPercent).toBe(80)
+  })
+
+  it('删除用户时级联删除', () => {
+    db.insert(userPreferences).values({ userId }).run()
+    db.delete(users).where(eq(users.id, userId)).run()
+    expect(db.select().from(userPreferences).all()).toHaveLength(0)
   })
 })
 

@@ -56,7 +56,41 @@ useHead({
 
 const sortBy = ref<'count'>('count')
 const searchTerm = ref('')
-const purifyPercent = ref(10)
+const purifyPercent = useCookie<number>('purify_percent', { default: () => 10 })
+
+// 登录后从 DB 同步偏好（DB > Cookie），首次登录把 Cookie 值写 DB
+if (import.meta.client) {
+  const { user: authUser } = useAuth()
+  watch(authUser, async (u) => {
+    if (!u?.bilibiliUid) return
+    try {
+      const prefs = await $fetch<{ purifyPercent: number | null }>('/api/user/preferences')
+      if (prefs.purifyPercent !== null) {
+        // DB 有记录 → 覆盖 Cookie
+        purifyPercent.value = prefs.purifyPercent
+      } else {
+        // DB 无记录 → 把当前 Cookie 值写入 DB
+        $fetch('/api/user/preferences', {
+          method: 'PUT',
+          body: { purifyPercent: purifyPercent.value },
+        }).catch(() => {})
+      }
+    } catch { /* 请求失败静默，保持 Cookie 值 */ }
+  }, { immediate: true })
+
+  // 调整滑块 → 1s debounce 写 DB
+  let saveTimer: ReturnType<typeof setTimeout>
+  watch(purifyPercent, (val) => {
+    if (!authUser.value?.bilibiliUid) return
+    clearTimeout(saveTimer)
+    saveTimer = setTimeout(() => {
+      $fetch('/api/user/preferences', {
+        method: 'PUT',
+        body: { purifyPercent: val },
+      }).catch(() => {})
+    }, 1000)
+  })
+}
 
 // 非 lazy：SSR 阶段获取缓存时间戳（只读内存缓存，几乎无延迟）
 const { data: tsData } = await useAsyncData('ranking-timestamp', () =>

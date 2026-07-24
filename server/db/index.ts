@@ -177,6 +177,11 @@ export async function initDb(dbPath?: string): Promise<Database> {
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`)
 
+  sqlDb.run(`CREATE TABLE IF NOT EXISTS user_preferences (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    purify_percent INTEGER NOT NULL DEFAULT 10
+  )`)
+
   saveDb()
   return db
 }
