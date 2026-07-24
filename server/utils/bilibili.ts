@@ -391,6 +391,8 @@ const PASSPORT_BASE = 'https://passport.bilibili.com'
 export interface QrCodeResult {
   url: string
   qrcode_key: string
+  /** generate 请求返回的 Set-Cookie，后续 poll 时需要回传以维持同一会话 */
+  cookies: string
 }
 
 /** 扫码轮询状态码 */
@@ -424,25 +426,41 @@ export interface BilibiliUserInfo {
  * 返回二维码 URL 和 qrcode_key（密钥有效期 180 秒）
  */
 export async function generateQrCode(): Promise<QrCodeResult> {
-  const response = await $fetch<{
-    code: number
-    message: string
-    data: { url: string; qrcode_key: string }
-  }>(`${PASSPORT_BASE}/x/passport-login/web/qrcode/generate`, {
+  // 使用原生 fetch 以获取 Set-Cookie 响应头（后续 poll 时需要回传以维持同一会话）
+  const response = await fetch(`${PASSPORT_BASE}/x/passport-login/web/qrcode/generate`, {
     headers: DEFAULT_HEADERS,
-    timeout: 8000,
   })
 
-  if (response.code !== 0) {
+  if (!response.ok) {
     throw createError({
       statusCode: 502,
-      statusMessage: `B站二维码生成失败 [${response.code}]: ${response.message}`,
+      statusMessage: `B站二维码生成失败: HTTP ${response.status}`,
     })
   }
 
+  const body = await response.json() as {
+    code: number
+    message: string
+    data: { url: string; qrcode_key: string }
+  }
+
+  if (body.code !== 0) {
+    throw createError({
+      statusCode: 502,
+      statusMessage: `B站二维码生成失败 [${body.code}]: ${body.message}`,
+    })
+  }
+
+  // 提取 Set-Cookie 响应头，后续 poll 时需要回传以维持同一会话
+  const setCookieHeaders = response.headers.getSetCookie?.() || []
+  const cookies = setCookieHeaders
+    .map((h) => h.split(';')[0])
+    .join('; ')
+
   return {
-    url: response.data.url,
-    qrcode_key: response.data.qrcode_key,
+    url: body.data.url,
+    qrcode_key: body.data.qrcode_key,
+    cookies,
   }
 }
 
@@ -458,14 +476,20 @@ export async function generateQrCode(): Promise<QrCodeResult> {
  * - 0: 登录成功 → success（同时返回 Set-Cookie 和 refresh_token）
  *
  * @param qrcodeKey - 二维码密钥
+ * @param cookies - generate 请求返回的 Cookie（维持同一会话）
  * @returns 轮询结果（含 cookie 和 refresh_token 如果登录成功）
  */
-export async function pollQrCode(qrcodeKey: string): Promise<QrPollResult> {
+export async function pollQrCode(qrcodeKey: string, cookies?: string): Promise<QrPollResult> {
   // 使用原始 fetch 以获取 Set-Cookie 响应头
   const url = `${PASSPORT_BASE}/x/passport-login/web/qrcode/poll?qrcode_key=${encodeURIComponent(qrcodeKey)}`
 
+  const headers: Record<string, string> = { ...DEFAULT_HEADERS }
+  if (cookies) {
+    headers['Cookie'] = cookies
+  }
+
   const response = await fetch(url, {
-    headers: DEFAULT_HEADERS,
+    headers,
   })
 
   if (!response.ok) {

@@ -49,24 +49,56 @@ describe('generateQrCode', () => {
     await freshImport()
   })
 
-  it('成功返回二维码 URL 和 qrcode_key', async () => {
-    mock$Fetch.mockResolvedValueOnce({
-      code: 0, message: '0',
-      data: { url: 'https://passport.bilibili.com/...?qrcode_key=abc', qrcode_key: 'abc123def456' },
+  it('成功返回二维码 URL、qrcode_key 和 cookies', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        code: 0, message: '0',
+        data: { url: 'https://passport.bilibili.com/...?qrcode_key=abc', qrcode_key: 'abc123def456' },
+      }),
+      headers: { getSetCookie: () => ['buvid3=xxx; Path=/; Domain=.bilibili.com', 'b_nut=123; Path=/'] },
     })
 
     const r = await mod.generateQrCode()
     expect(r.url).toContain('qrcode_key=abc')
     expect(r.qrcode_key).toBe('abc123def456')
+    expect(r.cookies).toBe('buvid3=xxx; b_nut=123')
+  })
+
+  it('生成二维码时无 Set-Cookie 返回空字符串', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        code: 0, message: '0',
+        data: { url: 'https://passport.bilibili.com/...?qrcode_key=abc', qrcode_key: 'abc123def456' },
+      }),
+      headers: { getSetCookie: () => [] },
+    })
+
+    const r = await mod.generateQrCode()
+    expect(r.cookies).toBe('')
   })
 
   it('B站返回非0 code 时抛出错误', async () => {
-    mock$Fetch.mockResolvedValueOnce({ code: -412, message: '请求过于频繁', data: null })
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ code: -412, message: '请求过于频繁', data: null }),
+      headers: { getSetCookie: () => [] },
+    })
     await expect(mod.generateQrCode()).rejects.toThrow(/请求过于频繁/)
   })
 
+  it('HTTP 非 200 时抛出错误', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false, status: 502,
+      json: async () => ({}),
+      headers: { getSetCookie: () => [] },
+    })
+    await expect(mod.generateQrCode()).rejects.toThrow(/HTTP 502/)
+  })
+
   it('请求超时时抛出错误', async () => {
-    mock$Fetch.mockRejectedValueOnce(new Error('timeout'))
+    mockFetch.mockRejectedValueOnce(new Error('timeout'))
     await expect(mod.generateQrCode()).rejects.toThrow('timeout')
   })
 })
@@ -136,6 +168,15 @@ describe('pollQrCode', () => {
   it('HTTP 非 200 → 抛错', async () => {
     mockFetch.mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}), headers: { getSetCookie: () => [] } })
     await expect(mod.pollQrCode('k')).rejects.toThrow(/HTTP 500/)
+  })
+
+  it('传入 cookies 时在请求头中带上 Cookie', async () => {
+    mockFetch.mockResolvedValueOnce(makeResp(86101, '未扫码'))
+    await mod.pollQrCode('k', 'buvid3=xxx; b_nut=123')
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit]
+    expect(init.headers).toBeDefined()
+    expect((init.headers as Record<string, string>)['Cookie']).toBe('buvid3=xxx; b_nut=123')
   })
 })
 

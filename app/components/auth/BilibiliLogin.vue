@@ -94,6 +94,7 @@ function clearMenuTimer() {
   }
 }
 let qrcodeKey = ''
+let qrCookies = ''
 
 /** 生成二维码到 canvas */
 async function renderQr(url: string) {
@@ -103,7 +104,13 @@ async function renderQr(url: string) {
   await QRCode.toCanvas(canvas, url, { width: 200, margin: 1 })
 }
 
-/** 轮询扫码状态 */
+/**
+ * 轮询扫码状态
+ *
+ * 并发请求可能乱序到达（尤其高延迟的海外服务器），采用优先级策略：
+ * - success 拥有最高优先级，无论当前状态如何都可覆盖
+ * - expired / error 为终态，一旦处于这些状态则忽略其他非 success 响应
+ */
 async function pollStatus() {
   if (!qrcodeKey) return
 
@@ -111,8 +118,25 @@ async function pollStatus() {
     const data = await $fetch<{
       status: string
       message?: string
-    }>('/api/auth/qr-check', { params: { qrcode_key: qrcodeKey } })
+    }>('/api/auth/qr-check', { params: { qrcode_key: qrcodeKey, cookies: qrCookies } })
 
+    // success 最高优先级：可以覆盖任何状态（包括已显示 expired/error）
+    if (data.status === 'success') {
+      qrStatus.value = 'success'
+      stopPolling()
+      setTimeout(async () => {
+        showQr.value = false
+        await fetchUser()
+      }, 800)
+      return
+    }
+
+    // 已处于终态（success / expired / error），忽略其他非 success 响应
+    if (qrStatus.value === 'success' || qrStatus.value === 'expired' || qrStatus.value === 'error') {
+      return
+    }
+
+    // 正常状态流转
     switch (data.status) {
       case 'pending':
         break
@@ -123,16 +147,10 @@ async function pollStatus() {
         qrStatus.value = 'expired'
         stopPolling()
         break
-      case 'success':
-        qrStatus.value = 'success'
-        stopPolling()
-        setTimeout(async () => {
-          showQr.value = false
-          await fetchUser()
-        }, 800)
-        break
     }
   } catch {
+    // success 优先：如果已有 success 则忽略网络错误
+    if (qrStatus.value === 'success') return
     qrStatus.value = 'error'
     stopPolling()
   }
@@ -152,8 +170,9 @@ async function startLogin() {
   stopPolling()
 
   try {
-    const data = await $fetch<{ url: string; qrcode_key: string }>('/api/auth/qr')
-    qrcodeKey = data.qrcode_key
+      const data = await $fetch<{ url: string; qrcode_key: string; cookies: string }>('/api/auth/qr')
+      qrcodeKey = data.qrcode_key
+      qrCookies = data.cookies || ''
 
     // 先切换到 pending 让 canvas DOM 渲染，再 nextTick 后绘制
     qrStatus.value = 'pending'

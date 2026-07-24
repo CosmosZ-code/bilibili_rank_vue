@@ -11,6 +11,7 @@ import { fetchPersonalizedOnly } from '../../utils/rankingFetcher'
 export default defineEventHandler(async (event) => {
   const query = getQuery(event)
   const qrcodeKey = query.qrcode_key as string
+  const cookies = query.cookies as string | undefined
 
   if (!qrcodeKey) {
     throw createError({
@@ -19,8 +20,8 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  // 轮询 B站 扫码状态
-  const result = await pollQrCode(qrcodeKey)
+  // 轮询 B站 扫码状态（传入 cookies 以维持同一会话）
+  const result = await pollQrCode(qrcodeKey, cookies)
 
   // 登录成功，处理后续流程
   if (result.status === 'success' && result.cookie) {

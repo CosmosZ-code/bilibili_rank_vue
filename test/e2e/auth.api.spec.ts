@@ -15,7 +15,7 @@ describe('Auth API 路由', async () => {
   describe('GET /api/auth/qr', () => {
     it('返回二维码 URL 和 qrcode_key', { timeout: 15000 }, async () => {
       // 注意：此测试调用真实 B站 API，在 B站 不可达时可能失败
-      const data = await $fetch<{ url: string; qrcode_key: string }>('/api/auth/qr')
+      const data = await $fetch<{ url: string; qrcode_key: string; cookies: string }>('/api/auth/qr')
 
       expect(data).toBeDefined()
       expect(typeof data.url).toBe('string')
