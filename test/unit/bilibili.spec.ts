@@ -78,9 +78,11 @@ describe('WBI 签名逻辑验证', () => {
       const allParams = { ...params, wts }
       const sortedKeys = Object.keys(allParams).sort()
 
-      const queryParts = sortedKeys.map(
-        (key) => `${encodeURIComponent(key)}=${encodeURIComponent(String(allParams[key]))}`,
-      )
+      const chrFilter = /[!'()*]/g
+      const queryParts = sortedKeys.map((key) => {
+        const value = String(allParams[key]).replace(chrFilter, '')
+        return `${encodeURIComponent(key)}=${encodeURIComponent(value)}`
+      })
       const queryString = queryParts.join('&')
 
       const wRid = createHash('md5')
@@ -106,6 +108,44 @@ describe('WBI 签名逻辑验证', () => {
     expect(String(result.wts).length).toBe(10)
   })
 
+  it('WBI 签名参数值中 !\'()* 字符被过滤', () => {
+    const { createHash } = require('node:crypto')
+
+    function signWbiParams(
+      params: Record<string, string | number>,
+      imgKey: string,
+      subKey: string,
+    ): { w_rid: string; wts: number } {
+      const mixinKey = getMixinKey(imgKey + subKey)
+      const wts = 1234567890
+
+      const allParams = { ...params, wts }
+      const sortedKeys = Object.keys(allParams).sort()
+
+      const chrFilter = /[!'()*]/g
+      const queryParts = sortedKeys.map((key) => {
+        const value = String(allParams[key]).replace(chrFilter, '')
+        return `${encodeURIComponent(key)}=${encodeURIComponent(value)}`
+      })
+      const queryString = queryParts.join('&')
+
+      const wRid = createHash('md5')
+        .update(queryString + mixinKey)
+        .digest('hex')
+
+      return { w_rid: wRid, wts }
+    }
+
+    const imgKey = '7cd084941338484aae1ad9425b84077c'
+    const subKey = 'a5d6e7f83b4c2d1a9e8f7c6b5a4d3e2f'
+
+    // 包含 !'()* 的参数值应与过滤后相同参数的签名一致
+    const result1 = signWbiParams({ q: "test!qu'ery(v)al*ue" }, imgKey, subKey)
+    const result2 = signWbiParams({ q: 'testqueryvalue' }, imgKey, subKey)
+
+    expect(result1.w_rid).toBe(result2.w_rid)
+  })
+
   it('WBI 签名参数顺序无关（排序后一致）', () => {
     const { createHash } = require('node:crypto')
 
@@ -120,9 +160,11 @@ describe('WBI 签名逻辑验证', () => {
       const allParams = { ...params, wts }
       const sortedKeys = Object.keys(allParams).sort()
 
-      const queryParts = sortedKeys.map(
-        (key) => `${encodeURIComponent(key)}=${encodeURIComponent(String(allParams[key]))}`,
-      )
+      const chrFilter = /[!'()*]/g
+      const queryParts = sortedKeys.map((key) => {
+        const value = String(allParams[key]).replace(chrFilter, '')
+        return `${encodeURIComponent(key)}=${encodeURIComponent(value)}`
+      })
       const queryString = queryParts.join('&')
 
       const wRid = createHash('md5')

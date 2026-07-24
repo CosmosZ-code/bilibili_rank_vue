@@ -10,7 +10,7 @@ import {
   DEFAULT_REFRESH_INTERVAL_MS,
 } from '../../server/utils/cacheWarmerConfig'
 
-const DEFAULT = DEFAULT_REFRESH_INTERVAL_MS // 4 * 60 * 1000 = 240000
+const DEFAULT = DEFAULT_REFRESH_INTERVAL_MS // 6 * 60 * 1000 = 360000
 
 describe('resolveRefreshInterval', () => {
   it('undefined 返回默认值', () => {
@@ -63,25 +63,29 @@ describe('calculateBackoffDelay — 退避延迟计算', () => {
     expect(calculateBackoffDelay(2)).toBe(120_000)
   })
 
-  it('第 4 次失败(3) → 240s（封顶）', () => {
+  it('第 4 次失败(3) → 240s', () => {
     expect(calculateBackoffDelay(3)).toBe(240_000)
   })
 
-  it('超过封顶仍返回封顶值', () => {
-    expect(calculateBackoffDelay(10)).toBe(240_000)
+  it('第 5 次失败(4) → 480s（封顶）', () => {
+    expect(calculateBackoffDelay(4)).toBe(480_000)
   })
 
-  it('负数输入应抛出错误', () => {
-    expect(() => calculateBackoffDelay(-1)).toThrow('consecutiveFailures 不能为负数')
+  it('超过封顶(10) → 480s', () => {
+    expect(calculateBackoffDelay(10)).toBe(480_000)
   })
 
-  it('退避延迟不超过 DEFAULT_REFRESH_INTERVAL_MS', () => {
+  it('极大值(100) 仍返回封顶值', () => {
+    expect(calculateBackoffDelay(100)).toBe(480_000)
+  })
+
+  it('退避延迟封顶值等于序列最大值 480s', () => {
     const delay = calculateBackoffDelay(999)
-    expect(delay).toBeLessThanOrEqual(DEFAULT_REFRESH_INTERVAL_MS)
+    expect(delay).toBe(480_000)
   })
 
   it('连续失败次数递增，延迟不递减', () => {
-    const delays = [0, 1, 2, 3, 4].map((n) => calculateBackoffDelay(n))
+    const delays = [0, 1, 2, 3, 4, 5].map((n) => calculateBackoffDelay(n))
     for (let i = 1; i < delays.length; i++) {
       expect(delays[i]).toBeGreaterThanOrEqual(delays[i - 1])
     }

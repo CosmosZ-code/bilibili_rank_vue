@@ -6,7 +6,6 @@
 import { describe, it, expect } from 'vitest'
 import {
   calculateBackoffDelay,
-  DEFAULT_REFRESH_INTERVAL_MS,
 } from '../../server/utils/cacheWarmerConfig'
 
 describe('calculateBackoffDelay — 退避延迟计算', () => {
@@ -22,16 +21,20 @@ describe('calculateBackoffDelay — 退避延迟计算', () => {
     expect(calculateBackoffDelay(2)).toBe(120_000)
   })
 
-  it('第 4 次失败(3) → 240s（封顶）', () => {
+  it('第 4 次失败(3) → 240s', () => {
     expect(calculateBackoffDelay(3)).toBe(240_000)
   })
 
-  it('超过封顶(10) → 240s', () => {
-    expect(calculateBackoffDelay(10)).toBe(240_000)
+  it('第 5 次失败(4) → 480s', () => {
+    expect(calculateBackoffDelay(4)).toBe(480_000)
+  })
+
+  it('超过封顶(10) → 480s', () => {
+    expect(calculateBackoffDelay(10)).toBe(480_000)
   })
 
   it('极大值(100) 仍返回封顶值', () => {
-    expect(calculateBackoffDelay(100)).toBe(240_000)
+    expect(calculateBackoffDelay(100)).toBe(480_000)
   })
 
   it('负数输入应抛出错误', () => {
@@ -39,7 +42,7 @@ describe('calculateBackoffDelay — 退避延迟计算', () => {
   })
 
   it('自定义 maxDelay 为 60s 时封顶为 60s', () => {
-    // 退避序列 30s→60s→120s→240s，但 maxDelay=60s，所以 3rd failure 也会被截断
+    // 退避序列 30s→60s→120s→240s→480s，但 maxDelay=60s
     expect(calculateBackoffDelay(0, 60_000)).toBe(30_000)
     expect(calculateBackoffDelay(1, 60_000)).toBe(60_000)
     expect(calculateBackoffDelay(2, 60_000)).toBe(60_000) // 120s 被截断
@@ -51,15 +54,13 @@ describe('calculateBackoffDelay — 退避延迟计算', () => {
     expect(calculateBackoffDelay(5, 10_000)).toBe(10_000)
   })
 
-  it('退避延迟不超过 DEFAULT_REFRESH_INTERVAL_MS', () => {
-    // 默认封顶就是 DEFAULT_REFRESH_INTERVAL_MS
+  it('退避延迟封顶值等于序列最大值 480s', () => {
     const delay = calculateBackoffDelay(999)
-    expect(delay).toBeLessThanOrEqual(DEFAULT_REFRESH_INTERVAL_MS)
-    expect(delay).toBe(240_000) // 退避序列封顶值
+    expect(delay).toBe(480_000) // 退避序列封顶值
   })
 
   it('连续失败次数递增，延迟不递减', () => {
-    const delays = [0, 1, 2, 3, 4].map((n) => calculateBackoffDelay(n))
+    const delays = [0, 1, 2, 3, 4, 5].map((n) => calculateBackoffDelay(n))
     for (let i = 1; i < delays.length; i++) {
       expect(delays[i]).toBeGreaterThanOrEqual(delays[i - 1])
     }

@@ -1,19 +1,21 @@
 /**
  * rankingFetcher 单元测试
  *
- * 测试 retryFailedVideos 和 retryFailedMetadata 的数据合并逻辑和边界行为。
- * 通过 mock getBilibiliOnlineCount / getBilibiliVideoStats 模拟网络成功/失败场景。
+ * 测试 retryFailedVideos / retryFailedMetadata 的数据合并逻辑和边界行为，
+ * 以及 fetchRankingData 的端点跳过、失败追踪、existingData 合并。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import type { VideosDataMap } from '../../app/types'
+import type { VideosDataMap, RankingVideo } from '../../app/types'
 
 // Mock bilibili 模块
 const mockGetOnlineCount = vi.fn()
 const mockGetVideoStats = vi.fn()
+const mockGetRanking = vi.fn()
+const mockGetPopular = vi.fn()
 
 vi.mock('../../server/utils/bilibili', () => ({
-  getBilibiliRanking: vi.fn(),
-  getBilibiliPopular: vi.fn(),
+  getBilibiliRanking: mockGetRanking,
+  getBilibiliPopular: mockGetPopular,
   getBilibiliOnlineCount: mockGetOnlineCount,
   getBilibiliVideoStats: mockGetVideoStats,
   ensureHttps: vi.fn((url: string) => url),
@@ -22,7 +24,7 @@ vi.mock('../../server/utils/bilibili', () => ({
 }))
 
 // 动态导入（必须在 vi.mock 之后）
-const { retryFailedVideos, retryFailedMetadata } = await import('../../server/utils/rankingFetcher')
+const { retryFailedVideos, retryFailedMetadata, fetchRankingData } = await import('../../server/utils/rankingFetcher')
 
 /** 创建测试用的 VideoInfo */
 function makeVideo(overrides: Partial<{
@@ -348,5 +350,203 @@ describe('retryFailedMetadata — 元数据重试逻辑', () => {
     // 仍在失败列表
     expect(result.stillEmptyPic).toContain('BV1xx')
     expect(result.stillZeroStat).toContain('BV1xx')
+  })
+})
+
+// ============================================================
+// fetchRankingData — 端点跳过、失败追踪、existingData 合并
+// ============================================================
+
+/** 创建 mock 排行榜/热门视频（模拟 B站 API 原始返回） */
+function makeRankingVideo(bvid: string, overrides: Partial<{
+  cid: number
+  title: string
+  pic: string
+  ownerName: string
+  ownerMid: number
+  view: number
+  danmaku: number
+}> = {}) {
+  return {
+    bvid,
+    cid: overrides.cid ?? 1,
+    title: overrides.title ?? `视频 ${bvid}`,
+    pic: overrides.pic ?? `https://example.com/${bvid}.jpg`,
+    owner: { name: overrides.ownerName ?? 'UP主', mid: overrides.ownerMid ?? 12345 },
+    stat: { view: overrides.view ?? 10000, danmaku: overrides.danmaku ?? 500 },
+  }
+}
+
+describe('fetchRankingData — 端点跳过与失败追踪', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    // 默认 mock：在线人数返回固定值
+    mockGetOnlineCount.mockResolvedValue({ formatted: '1000', raw: 1000 })
+  })
+
+  it('正常拉取两个端点', async () => {
+    mockGetRanking.mockResolvedValue([makeRankingVideo('BV1xx'), makeRankingVideo('BV2yy')])
+    mockGetPopular.mockResolvedValue([makeRankingVideo('BV3zz')])
+
+    const result = await fetchRankingData()
+
+    expect(result).not.toBeNull()
+    expect(result!.rankingFailed).toBe(false)
+    expect(result!.popularFailed).toBe(false)
+    expect(Object.keys(result!.data).length).toBe(3)
+    expect(mockGetRanking).toHaveBeenCalledTimes(1)
+    expect(mockGetPopular).toHaveBeenCalledTimes(1)
+  })
+
+  it('skipRanking 跳过后仅拉取热门，排行失败标志为 false', async () => {
+    mockGetPopular.mockResolvedValue([makeRankingVideo('BV1xx'), makeRankingVideo('BV2yy')])
+
+    const result = await fetchRankingData({ skipRanking: true })
+
+    expect(result).not.toBeNull()
+    expect(result!.rankingFailed).toBe(false)
+    expect(result!.popularFailed).toBe(false)
+    expect(Object.keys(result!.data).length).toBe(2)
+    expect(mockGetRanking).not.toHaveBeenCalled()
+    expect(mockGetPopular).toHaveBeenCalledTimes(1)
+  })
+
+  it('skipPopular 跳过后仅拉取排行，热门失败标志为 false', async () => {
+    mockGetRanking.mockResolvedValue([makeRankingVideo('BV1xx')])
+
+    const result = await fetchRankingData({ skipPopular: true })
+
+    expect(result).not.toBeNull()
+    expect(result!.rankingFailed).toBe(false)
+    expect(result!.popularFailed).toBe(false)
+    expect(Object.keys(result!.data).length).toBe(1)
+    expect(mockGetRanking).toHaveBeenCalledTimes(1)
+    expect(mockGetPopular).not.toHaveBeenCalled()
+  })
+
+  it('排行返回空数组时 rankingFailed=true', async () => {
+    mockGetRanking.mockResolvedValue([])
+    mockGetPopular.mockResolvedValue([makeRankingVideo('BV1xx'), makeRankingVideo('BV2yy')])
+
+    const result = await fetchRankingData()
+
+    expect(result).not.toBeNull()
+    expect(result!.rankingFailed).toBe(true)
+    expect(result!.popularFailed).toBe(false)
+    expect(Object.keys(result!.data).length).toBe(2) // 仅热门数据
+  })
+
+  it('热门返回空数组时 popularFailed=true', async () => {
+    mockGetRanking.mockResolvedValue([makeRankingVideo('BV1xx')])
+    mockGetPopular.mockResolvedValue([])
+
+    const result = await fetchRankingData()
+
+    expect(result).not.toBeNull()
+    expect(result!.rankingFailed).toBe(false)
+    expect(result!.popularFailed).toBe(true)
+    expect(Object.keys(result!.data).length).toBe(1) // 仅排行数据
+  })
+
+  it('排行抛异常时 rankingFailed=true（withTimeout 兜底）', async () => {
+    mockGetRanking.mockRejectedValue(new Error('-352'))
+    mockGetPopular.mockResolvedValue([makeRankingVideo('BV1xx')])
+
+    const result = await fetchRankingData()
+
+    expect(result).not.toBeNull()
+    expect(result!.rankingFailed).toBe(true)
+    expect(result!.popularFailed).toBe(false)
+  })
+
+  it('两个端点都失败时返回 null', async () => {
+    mockGetRanking.mockResolvedValue([])
+    mockGetPopular.mockResolvedValue([])
+
+    const result = await fetchRankingData()
+
+    expect(result).toBeNull()
+  })
+
+  it('existingData 保留已有数据，新数据覆盖同 BVid', async () => {
+    const existing: VideosDataMap = {
+      BV1xx: {
+        title: '旧视频', owner: '旧UP主', mid: '999',
+        pic: 'https://old.jpg', online_count: '500', count_num: 500,
+        play_count_num: 1000, danmaku_count_num: 50,
+        play_count: '1000', danmaku_count: '50',
+      },
+    }
+
+    mockGetRanking.mockResolvedValue([
+      makeRankingVideo('BV1xx', { title: '新视频', ownerName: '新UP主' }),
+      makeRankingVideo('BV2yy', { title: '新增视频' }),
+    ])
+    // 不拉取热门
+    mockGetPopular.mockResolvedValue([])
+
+    const result = await fetchRankingData({ existingData: existing, skipPopular: true })
+
+    expect(result).not.toBeNull()
+    // BV1xx 被新数据覆盖（title 变了），BV2yy 新增，共计 2 条
+    expect(Object.keys(result!.data).length).toBe(2)
+    expect(result!.data['BV1xx'].title).toBe('新视频')
+    expect(result!.data['BV1xx'].owner).toBe('新UP主')
+    expect(result!.data['BV2yy'].title).toBe('新增视频')
+  })
+
+  it('skipRanking + existingData 时仅追加热门新视频', async () => {
+    const existing: VideosDataMap = {
+      BV_OLD: {
+        title: '旧排行视频', owner: 'UP主', mid: '1',
+        pic: 'https://old.jpg', online_count: '500', count_num: 500,
+        play_count_num: 1000, danmaku_count_num: 50,
+        play_count: '1000', danmaku_count: '50',
+      },
+    }
+
+    mockGetPopular.mockResolvedValue([
+      makeRankingVideo('BV_NEW', { title: '新热门视频' }),
+      makeRankingVideo('BV_OLD', { title: '热门也有此视频' }), // 同 BVid，应跳过
+    ])
+
+    const result = await fetchRankingData({ skipRanking: true, existingData: existing })
+
+    expect(result).not.toBeNull()
+    // BV_OLD 已存在，被新热门数据覆盖；BV_NEW 新增 → 共 2 条
+    expect(Object.keys(result!.data).length).toBe(2)
+    // BV_OLD 被新数据覆盖
+    expect(result!.data['BV_OLD'].title).toBe('热门也有此视频')
+    expect(result!.data['BV_NEW'].title).toBe('新热门视频')
+    expect(mockGetRanking).not.toHaveBeenCalled()
+  })
+
+  it('skipRanking + skipPopular 均为 true 但无 existingData 时返回 null', async () => {
+    const result = await fetchRankingData({ skipRanking: true, skipPopular: true })
+
+    expect(result).toBeNull()
+    expect(mockGetRanking).not.toHaveBeenCalled()
+    expect(mockGetPopular).not.toHaveBeenCalled()
+  })
+
+  it('skipRanking + skipPopular 均为 true 且有 existingData 时保留所有旧数据', async () => {
+    const existing: VideosDataMap = {
+      BV1xx: {
+        title: '保留视频', owner: 'UP主', mid: '1',
+        pic: 'https://keep.jpg', online_count: '500', count_num: 500,
+        play_count_num: 1000, danmaku_count_num: 50,
+        play_count: '1000', danmaku_count: '50',
+      },
+    }
+
+    const result = await fetchRankingData({
+      skipRanking: true, skipPopular: true, existingData: existing,
+    })
+
+    expect(result).not.toBeNull()
+    expect(Object.keys(result!.data).length).toBe(1)
+    expect(result!.data['BV1xx'].title).toBe('保留视频')
+    expect(result!.rankingFailed).toBe(false)
+    expect(result!.popularFailed).toBe(false)
   })
 })

@@ -45,7 +45,7 @@ describe('cache-warmer 定时刷新', async () => {
    */
   async function waitForNextRefresh(
     previous: number,
-    maxWait: number = 8000,
+    maxWait: number = 15000,
     pollMs: number = 500,
   ): Promise<number> {
     const deadline = Date.now() + maxWait
@@ -82,7 +82,7 @@ describe('cache-warmer 定时刷新', async () => {
     expect(['HIT', 'MISS']).toContain(cacheHeader)
   })
 
-  it('多次请求间缓存 HIT 时 timestamp 保持一致', { timeout: 15000 }, async () => {
+  it('多次请求间缓存 HIT 时 timestamp 保持一致', { timeout: 30000 }, async () => {
     // 等待一次刷新完成
     const ts1 = await getTimestamp()
     await waitForNextRefresh(ts1)

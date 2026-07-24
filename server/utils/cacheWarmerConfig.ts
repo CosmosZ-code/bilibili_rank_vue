@@ -4,11 +4,11 @@
  * 纯函数，不依赖 Nitro 运行时，可单元测试。
  */
 
-/** 默认刷新间隔：4 分钟 */
-export const DEFAULT_REFRESH_INTERVAL_MS = 4 * 60 * 1000
+/** 默认刷新间隔：6 分钟 */
+export const DEFAULT_REFRESH_INTERVAL_MS = 6 * 60 * 1000
 
-/** 退避延迟序列（毫秒）：30s → 60s → 120s → 240s（封顶） */
-const BACKOFF_SEQUENCE = [30_000, 60_000, 120_000, 240_000]
+/** 退避延迟序列（毫秒）：30s → 60s → 120s → 240s → 480s（封顶） */
+const BACKOFF_SEQUENCE = [30_000, 60_000, 120_000, 240_000, 480_000]
 
 /**
  * 从环境变量值解析刷新间隔
@@ -27,16 +27,16 @@ export function resolveRefreshInterval(envValue: string | undefined, defaultMs: 
 /**
  * 根据连续失败次数计算退避延迟
  *
- * 序列：0→30s, 1→60s, 2→120s, 3+→240s（封顶）
+ * 序列：0→30s, 1→60s, 2→120s, 3→240s, 4+→480s（封顶）
  *
  * @param consecutiveFailures - 连续失败次数（>= 0）
- * @param maxDelay - 封顶延迟，默认 DEFAULT_REFRESH_INTERVAL_MS
+ * @param maxDelay - 封顶延迟，默认 2 × DEFAULT_REFRESH_INTERVAL_MS
  * @returns 下次重试应等待的毫秒数
  * @throws 当 consecutiveFailures < 0 时抛出
  */
 export function calculateBackoffDelay(
   consecutiveFailures: number,
-  maxDelay: number = DEFAULT_REFRESH_INTERVAL_MS,
+  maxDelay: number = 2 * DEFAULT_REFRESH_INTERVAL_MS,
 ): number {
   if (consecutiveFailures < 0) {
     throw new Error(`consecutiveFailures 不能为负数，当前值: ${consecutiveFailures}`)

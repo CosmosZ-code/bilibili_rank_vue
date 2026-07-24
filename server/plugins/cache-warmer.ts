@@ -13,6 +13,7 @@
  * 不依赖 Nitro cron Task 系统，在 dev / production / Docker 中行为一致。
  */
 import { fetchRankingData, retryFailedVideos, retryFailedMetadata } from '../utils/rankingFetcher'
+import { prefetchBiliTicket } from '../utils/bilibili'
 import { MOCK_RANKING } from '../utils/mockData'
 import {
   resolveRefreshInterval,
@@ -33,6 +34,81 @@ export default defineNitroPlugin((nitroApp) => {
   let consecutiveFailures = 0
   // 当前调度计时器（用于 clearTimeout）
   let scheduleTimer: ReturnType<typeof setTimeout> | null = null
+
+  // ---- 独立端点退避 ----
+  const RECOVERY_THRESHOLD = 3 // 连续成功 3 次后恢复
+
+  interface EndpointBackoff {
+    inBackoff: boolean
+    failures: number   // 连续失败次数（退避延迟计算）
+    successes: number  // 连续成功次数（恢复判定）
+    timer: ReturnType<typeof setTimeout> | null
+  }
+
+  const rankingState: EndpointBackoff = { inBackoff: false, failures: 0, successes: 0, timer: null }
+  const popularState: EndpointBackoff = { inBackoff: false, failures: 0, successes: 0, timer: null }
+
+  function getEndpointName(ep: string) {
+    return ep === 'ranking' ? '排行' : '热门'
+  }
+
+  /** 安排单个端点退避重试 */
+  function scheduleEndpointRetry(endpoint: 'ranking' | 'popular') {
+    const state = endpoint === 'ranking' ? rankingState : popularState
+    if (state.timer) clearTimeout(state.timer)
+    const delay = calculateBackoffDelay(state.failures - 1, normalInterval)
+    console.log(`[cache-warmer] ${getEndpointName(endpoint)} ${delay / 1000}s 后独立重试`)
+    state.timer = setTimeout(() => retryEndpoint(endpoint), delay)
+  }
+
+  /** 独立重试单个端点 */
+  async function retryEndpoint(endpoint: 'ranking' | 'popular') {
+    const state = endpoint === 'ranking' ? rankingState : popularState
+
+    // 读取当前缓存作为 existingData
+    const cached = await useStorage('cache').getItem<CacheEntry<VideosDataMap>>(cacheKey)
+    if (!cached?.data) return
+
+    const result = await fetchRankingData({
+      skipRanking: endpoint !== 'ranking',
+      skipPopular: endpoint !== 'popular',
+      existingData: cached.data,
+    })
+
+    const failed = endpoint === 'ranking' ? (result?.rankingFailed ?? true) : (result?.popularFailed ?? true)
+
+    if (result && !failed) {
+      // 更新缓存
+      await useStorage('cache').setItem(cacheKey, {
+        data: result.data,
+        timestamp: Date.now(),
+      })
+      state.successes++
+      console.log(
+        `[cache-warmer] ${getEndpointName(endpoint)} 独立重试成功 ` +
+        `(${state.successes}/${RECOVERY_THRESHOLD})，${Object.keys(result.data).length} 条视频`,
+      )
+
+      if (state.successes >= RECOVERY_THRESHOLD) {
+        // 恢复：退出退避，重新加入定时刷新
+        state.inBackoff = false
+        state.failures = 0
+        state.successes = 0
+        console.log(`[cache-warmer] ${getEndpointName(endpoint)} 已恢复，重新加入定时刷新`)
+      } else {
+        // 继续以短间隔重试，尽快达到恢复阈值
+        state.timer = setTimeout(() => retryEndpoint(endpoint), 60_000)
+      }
+    } else {
+      // 仍失败
+      state.successes = 0
+      state.failures++
+      console.warn(`[cache-warmer] ${getEndpointName(endpoint)} 独立重试仍失败，连续 ${state.failures} 次`)
+      scheduleEndpointRetry(endpoint)
+    }
+  }
+
+  // ---- 原有变量（失败视频/元数据重试）----
   // 待重试的失败视频 BVid 列表
   let pendingRetryBvids: string[] = []
   // 元数据重试（封面空/播放量为0）
@@ -70,21 +146,76 @@ export default defineNitroPlugin((nitroApp) => {
   }
 
   /**
-   * 完整刷新：拉取排行榜 + 热门 + 在线人数
+   * 完整刷新：拉取未退避端点（排行/热门），跳过的端点保留已有数据
    */
   async function refresh() {
     try {
-      const result = await fetchRankingData()
+      // 读取当前缓存作为 existingData（保留退避中端点的旧数据）
+      const cached = await useStorage('cache').getItem<CacheEntry<VideosDataMap>>(cacheKey)
+
+      const result = await fetchRankingData({
+        skipRanking: rankingState.inBackoff,
+        skipPopular: popularState.inBackoff,
+        existingData: cached?.data,
+      })
 
       if (result !== null && Object.keys(result.data).length > 0) {
-        // 成功：写入真实数据，重置失败计数
+        const videoCount = Object.keys(result.data).length
+
+        // 写入缓存
         await useStorage('cache').setItem(cacheKey, {
           data: result.data,
           timestamp: Date.now(),
         } satisfies CacheEntry<VideosDataMap>)
 
-        consecutiveFailures = 0
-        console.log(`[cache-warmer] 缓存已刷新: ${Object.keys(result.data).length} 条视频`)
+        // 检查各端点状态（仅检查我们实际请求的端点）
+        let allAttemptedFailed = true
+        let anyAttempted = false
+
+        if (!rankingState.inBackoff) {
+          anyAttempted = true
+          if (result.rankingFailed) {
+            rankingState.inBackoff = true
+            rankingState.failures = 1
+            rankingState.successes = 0
+            console.warn(`[cache-warmer] 排行被风控，进入独立退避`)
+            scheduleEndpointRetry('ranking')
+          } else {
+            allAttemptedFailed = false
+          }
+        }
+
+        if (!popularState.inBackoff) {
+          anyAttempted = true
+          if (result.popularFailed) {
+            popularState.inBackoff = true
+            popularState.failures = 1
+            popularState.successes = 0
+            console.warn(`[cache-warmer] 热门被风控，进入独立退避`)
+            scheduleEndpointRetry('popular')
+          } else {
+            allAttemptedFailed = false
+          }
+        }
+
+        if (anyAttempted && allAttemptedFailed) {
+          // 全部尝试的端点都失败
+          consecutiveFailures++
+          const delay = calculateBackoffDelay(consecutiveFailures - 1, normalInterval)
+          console.warn(`[cache-warmer] 全部端点失败，${delay / 1000}s 后退避重试`)
+          scheduleNextRefresh(delay)
+        } else {
+          consecutiveFailures = 0
+          const suffix = [
+            rankingState.inBackoff ? '排行退避中' : '',
+            popularState.inBackoff ? '热门退避中' : '',
+          ].filter(Boolean).join('，')
+          console.log(
+            `[cache-warmer] 缓存已刷新: ${videoCount} 条视频` +
+            (suffix ? `（${suffix}）` : ''),
+          )
+          scheduleNextRefresh(normalInterval)
+        }
 
         // 如果有失败视频（在线人数），安排独立重试
         if (result.failedBvids.length > 0) {
@@ -109,16 +240,12 @@ export default defineNitroPlugin((nitroApp) => {
           pendingEmptyPicBvids = []
           pendingZeroStatBvids = []
         }
-
-        // 正常间隔
-        scheduleNextRefresh(normalInterval)
       } else {
         // B站完全不可用：保留旧缓存，仅在缓存为空时写入 mock
         await handleFetchFailure()
       }
     } catch (err: any) {
       console.error('[cache-warmer] 刷新异常:', err.message || err)
-      // 异常情况（代码错误等）：保持旧缓存，按正常间隔重试
       scheduleNextRefresh(normalInterval)
     }
   }
@@ -260,10 +387,22 @@ export default defineNitroPlugin((nitroApp) => {
       clearTimeout(metadataRetryTimer)
       metadataRetryTimer = null
     }
+    if (rankingState.timer) {
+      clearTimeout(rankingState.timer)
+      rankingState.timer = null
+    }
+    if (popularState.timer) {
+      clearTimeout(popularState.timer)
+      popularState.timer = null
+    }
   }
 
-  // 启动时立即预热
+  // 启动时预取 bili_ticket（避免首次 API 请求因 GenWebTicket 与 B站 API 间隔过近触发风控）
   setImmediate(async () => {
+    console.log(`[cache-warmer] 预取 bili_ticket...`)
+    await prefetchBiliTicket()
+    // 预取完成后稍等 1 秒，避免 GenWebTicket 与实际 API 请求背靠背触发风控
+    await new Promise((r) => setTimeout(r, 1000))
     console.log(`[cache-warmer] 开始预热排行榜缓存... (刷新间隔: ${normalInterval / 1000}s)`)
     await refresh()
   })

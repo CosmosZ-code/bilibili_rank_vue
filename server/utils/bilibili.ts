@@ -14,7 +14,7 @@
  */
 
 import type { BilibiliResponse } from '../../app/types'
-import { createHash } from 'node:crypto'
+import { createHash, createHmac } from 'node:crypto'
 
 const BILIBILI_API_BASE = 'https://api.bilibili.com'
 
@@ -36,6 +36,15 @@ const MIXIN_KEY_ENC_TAB = [
 // WBI 密钥缓存（避免每次都请求 nav 接口）
 let wbiKeysCache: { imgKey: string; subKey: string; cachedAt: number } | null = null
 const WBI_CACHE_TTL = 30 * 60 * 1000 // 30 minutes
+
+// bili_ticket 缓存（降低风控概率，有效期 3 天）
+let biliTicketCache: { ticket: string; cachedAt: number } | null = null
+const TICKET_CACHE_TTL = 259200 * 1000 // 3 天（与 B站 ticket 有效期对齐）
+
+/** 简单的异步延迟 */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
 
 // ============================================================
 // WBI 签名
@@ -62,7 +71,8 @@ async function fetchWbiKeys(): Promise<{ imgKey: string; subKey: string }> {
       timeout: 5000,
     })
 
-    if (res.code === 0 && res.data?.wbi_img) {
+    // code=0 表示已登录，-101 表示未登录但 wbi_img 仍然返回
+    if ((res.code === 0 || res.code === -101) && res.data?.wbi_img) {
       // img_url 和 sub_url 格式如:
       // "https://i0.hdslb.com/bfs/wbi/7cd084941338484aae1ad9425b84077c.png"
       // 需要从文件名中提取密钥（去除 .png 后缀和路径前缀）
@@ -116,9 +126,12 @@ function signWbiParams(
   const sortedKeys = Object.keys(allParams).sort()
 
   // 构建查询字符串（不包含 ?）
-  const queryParts = sortedKeys.map(
-    (key) => `${encodeURIComponent(key)}=${encodeURIComponent(String(allParams[key]))}`,
-  )
+  // 过滤 value 中的 "!'()*" 字符（WBI 规范要求）
+  const chrFilter = /[!'()*]/g
+  const queryParts = sortedKeys.map((key) => {
+    const value = String(allParams[key]).replace(chrFilter, '')
+    return `${encodeURIComponent(key)}=${encodeURIComponent(value)}`
+  })
   const queryString = queryParts.join('&')
 
   // MD5(query_string + mixin_key)
@@ -127,6 +140,91 @@ function signWbiParams(
     .digest('hex')
 
   return { w_rid: wRid, wts }
+}
+
+// ============================================================
+// bili_ticket（降低风控概率）
+// ============================================================
+
+/**
+ * 获取 bili_ticket JWT 令牌
+ *
+ * bili_ticket 位于 Cookie 中，可降低 B站风控概率。
+ * 使用 HMAC-SHA256 签名调用 GenWebTicket API 获取，缓存有效期 3 天。
+ * 同时可顺便提取 WBI keys（作为 nav 接口的备选来源）。
+ *
+ * 建议在服务启动时调用 prefetchBiliTicket() 预取，
+ * 避免首次 API 请求因取 ticket 而触发风控。
+ *
+ * 参考：bilibili-API-collect/docs/misc/sign/bili_ticket.md
+ */
+async function fetchBiliTicket(): Promise<string> {
+  // 检查缓存
+  if (biliTicketCache && Date.now() - biliTicketCache.cachedAt < TICKET_CACHE_TTL) {
+    return biliTicketCache.ticket
+  }
+
+  try {
+    const ts = Math.floor(Date.now() / 1000)
+    const hmac = createHmac('sha256', 'XgwSnGZ1p')
+    hmac.update(`ts${ts}`)
+    const hexSign = hmac.digest('hex')
+
+    const url = new URL(
+      '/bapis/bilibili.api.ticket.v1.Ticket/GenWebTicket',
+      BILIBILI_API_BASE,
+    )
+    url.searchParams.set('key_id', 'ec02')
+    url.searchParams.set('hexsign', hexSign)
+    url.searchParams.set('context[ts]', String(ts))
+    url.searchParams.set('csrf', '')
+
+    const response = await $fetch<{
+      code: number
+      message: string
+      data?: {
+        ticket?: string
+        nav?: { img?: string; sub?: string }
+      }
+    }>(url.toString(), {
+      method: 'POST',
+      headers: DEFAULT_HEADERS,
+      timeout: 5000,
+    })
+
+    if (response.code === 0 && response.data?.ticket) {
+      biliTicketCache = { ticket: response.data.ticket, cachedAt: Date.now() }
+      console.log('[bili_ticket] ticket 已刷新')
+
+      // 顺便更新 WBI keys（如果 nav 接口之前获取失败）
+      if (response.data.nav?.img && response.data.nav?.sub) {
+        const imgKey = response.data.nav.img.split('/').pop()?.replace(/\.(png|gif|jpe?g)$/, '') || ''
+        const subKey = response.data.nav.sub.split('/').pop()?.replace(/\.(png|gif|jpe?g)$/, '') || ''
+        if (imgKey && subKey && (!wbiKeysCache || !wbiKeysCache.imgKey)) {
+          wbiKeysCache = { imgKey, subKey, cachedAt: Date.now() }
+          console.log('[bili_ticket] WBI keys 已同步更新')
+        }
+      }
+
+      return response.data.ticket
+    }
+
+    console.warn('[bili_ticket] 获取失败:', response.code, response.message)
+  } catch (err: any) {
+    console.warn('[bili_ticket] 请求异常:', err.message || err)
+  }
+
+  return ''
+}
+
+/**
+ * 预取 bili_ticket（供 cache-warmer 启动时调用）
+ *
+ * 提前获取 ticket，避免首次 API 请求因 GenWebTicket 调用与 B站 API
+ * 请求间隔过近而触发风控。
+ */
+export async function prefetchBiliTicket(): Promise<void> {
+  await fetchBiliTicket()
 }
 
 // ============================================================
@@ -143,12 +241,25 @@ export async function bilibiliRequest<T>(
     cookie?: string
     method?: 'GET' | 'POST'
     wbiSign?: boolean // 是否启用 WBI 签名
+    skipTicket?: boolean // 跳过 bili_ticket 附加（用于 GenWebTicket 自身）
   },
 ): Promise<BilibiliResponse<T>> {
   const headers: Record<string, string> = { ...DEFAULT_HEADERS }
 
   if (options?.cookie) {
     headers['Cookie'] = options.cookie
+  }
+
+  // 附加 bili_ticket（降低风控概率）
+  // 注意：skipTicket 为 true 时跳过（用于 GenWebTicket 自身，避免循环）
+  if (options?.skipTicket !== true) {
+    const ticket = await fetchBiliTicket()
+    if (ticket) {
+      const existingCookie = headers['Cookie'] || ''
+      headers['Cookie'] = existingCookie
+        ? `${existingCookie}; bili_ticket=${ticket}`
+        : `bili_ticket=${ticket}`
+    }
   }
 
   let params = { ...(options?.params || {}) }
@@ -177,6 +288,21 @@ export async function bilibiliRequest<T>(
   })
 
   if (response.code !== 0) {
+    // -352 风控失败：记录 v_voucher 信息以便排查
+    if (response.code === -352) {
+      const data = response.data as any
+      const vVoucher = data?.v_voucher || ''
+      if (vVoucher) {
+        console.warn(
+          `[bilibili] -352 风控 (${path}): v_voucher=${vVoucher} — 可能需要 CAPTCHA 解锁`,
+        )
+      } else {
+        console.warn(
+          `[bilibili] -352 风控 (${path}): 无 v_voucher，请检查 UA / WBI 签名 / bili_ticket`,
+        )
+      }
+    }
+
     throw createError({
       statusCode: 502,
       message: `B站API错误 [${response.code}]: ${response.message}`,
@@ -242,6 +368,11 @@ export async function getBilibiliPopular(pages: number = 4, cookie?: string): Pr
       results.push(...list)
 
       if (list.length < 50) break
+
+      // 页间延迟，避免触发风控
+      if (pn < pages) {
+        await sleep(500)
+      }
     } catch (err: any) {
       // 单页失败不中断其他页的请求
       console.warn(`[getBilibiliPopular] 第 ${pn} 页请求失败:`, err.message || err)

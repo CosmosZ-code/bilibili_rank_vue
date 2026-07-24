@@ -25,6 +25,10 @@ export interface RankingFetchResult {
   emptyPicBvids: string[]
   /** 播放量为 0 的 BV 号列表（排行榜视频不应为 0），通过 /x/web-interface/view 重试 */
   zeroStatBvids: string[]
+  /** 排行接口是否失败（返回 0 条） */
+  rankingFailed: boolean
+  /** 热门接口是否失败（返回 0 条） */
+  popularFailed: boolean
 }
 
 /** retryFailedVideos 的返回值 */
@@ -104,32 +108,61 @@ async function fetchOnlineCountBatch(
  * 从 B站 API 拉取完整的排行榜数据
  *
  * 流程：
- * 1. 并发请求排行榜 + 热门（各 10 秒超时）
- * 2. 合并 + 按 BV 号去重
+ * 1. 串行请求排行榜 → 热门（各 10 秒超时），可通过 skipRanking/skipPopular 跳过
+ * 2. 合并 + 按 BV 号去重（如传入 existingData 则以此为起点覆盖）
  * 3. 批量获取每个视频的在线人数（每批 5 个）
  * 4. 校验封面链接和播放量有效性
  *
- * @param cookie - 可选，传入用户的 B站 Cookie 使热门结果个性化
+ * @param options.cookie - 可选，传入用户的 B站 Cookie 使热门结果个性化
+ * @param options.skipRanking - 跳过排行拉取（保留 existingData 中已有数据）
+ * @param options.skipPopular - 跳过热门拉取（保留 existingData 中已有数据）
+ * @param options.existingData - 已有数据，新拉取结果会覆盖同 BVid 条目
  * @returns RankingFetchResult — 正常数据 + 失败追踪；null — B站完全不可用
  */
-export async function fetchRankingData(cookie?: string): Promise<RankingFetchResult | null> {
+export async function fetchRankingData(options?: {
+  cookie?: string
+  skipRanking?: boolean
+  skipPopular?: boolean
+  existingData?: VideosDataMap
+}): Promise<RankingFetchResult | null> {
   const apiTimeout = 10_000
+  let rankingFailed = false
+  let popularFailed = false
 
-  // 1. 并发请求排行榜 + 热门（带超时）
-  const [ranking, popular] = await Promise.all([
-    withTimeout(getBilibiliRanking().catch(() => []), apiTimeout, []),
-    withTimeout(getBilibiliPopular(2, cookie).catch(() => []), apiTimeout, []),
-  ])
+  // 1. 拉取排行榜（可跳过）
+  let ranking: RankingVideo[] = []
+  if (!options?.skipRanking) {
+    ranking = await withTimeout(
+      getBilibiliRanking().catch(() => []),
+      apiTimeout,
+      [],
+    )
+    if (ranking.length === 0) rankingFailed = true
 
-  // 2. 合并 + 去重
+    // 排行和热门之间间隔 1 秒
+    await new Promise((r) => setTimeout(r, 1000))
+  }
+
+  // 2. 拉取热门（可跳过）
+  let popular: RankingVideo[] = []
+  if (!options?.skipPopular) {
+    popular = await withTimeout(
+      getBilibiliPopular(2, options?.cookie).catch(() => []),
+      apiTimeout,
+      [],
+    )
+    if (popular.length === 0) popularFailed = true
+  }
+
+  // 3. 合并 + 去重
   const merged = dedupByBvid([...ranking, ...popular])
 
-  if (merged.length === 0) {
+  if (merged.length === 0 && (!options?.existingData || Object.keys(options.existingData).length === 0)) {
     return null
   }
 
-  // 3. 批量获取视频详情
-  const results: VideosDataMap = {}
+  // 4. 批量获取新视频详情（以 existingData 为起点，新数据覆盖同 BVid）
+  const results: VideosDataMap = options?.existingData ? { ...options.existingData } : {}
   const allFailedBvids: string[] = []
   const allEmptyPicBvids: string[] = []
   const allZeroStatBvids: string[] = []
@@ -179,6 +212,8 @@ export async function fetchRankingData(cookie?: string): Promise<RankingFetchRes
     failedBvids: allFailedBvids,
     emptyPicBvids: allEmptyPicBvids,
     zeroStatBvids: allZeroStatBvids,
+    rankingFailed: options?.skipRanking ? false : rankingFailed,
+    popularFailed: options?.skipPopular ? false : popularFailed,
   }
 }
 
