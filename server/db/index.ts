@@ -34,16 +34,14 @@ let _isMemoryOnly = false
  *
  * sql.js 依赖一个独立的 .wasm 文件。在不同运行环境中位置不同：
  * - 开发模式：node_modules/sql.js/dist/
- * - 生产构建：Nitro serverAssets 复制到 assets/sql-wasm/
+ * - 生产构建：Nitro 外置化 node_modules，WASM 由 Dockerfile 复制
  */
 function findWasmPath(): string {
   const candidates = [
     // 开发模式
     resolve(process.cwd(), 'node_modules/sql.js/dist/sql-wasm.wasm'),
-    // 生产构建（Nitro serverAssets）
-    resolve(process.cwd(), 'assets/sql-wasm/sql-wasm.wasm'),
-    // .output 目录
-    resolve(process.cwd(), '.output/server/assets/sql-wasm/sql-wasm.wasm'),
+    // 生产构建（Nitro external + Docker 复制）
+    resolve(process.cwd(), '.output/server/node_modules/sql.js/dist/sql-wasm.wasm'),
   ]
 
   for (const p of candidates) {

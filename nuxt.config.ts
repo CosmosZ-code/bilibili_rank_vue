@@ -43,11 +43,6 @@ export default defineNuxtConfig({
         driver: 'memory',
       },
     },
-    // 复制 sql.js WASM 文件到构建输出（用于 SQLite）
-    serverAssets: [{
-      baseName: 'sql-wasm',
-      dir: 'node_modules/sql.js/dist',
-    }],
   },
 
   // UnoCSS config
