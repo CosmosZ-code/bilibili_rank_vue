@@ -5,6 +5,11 @@ export default defineNuxtConfig({
   components: [{ path: "~/components", pathPrefix: false }],
   devtools: { enabled: true },
 
+  // Dev server（监听所有网络接口，允许局域网访问）
+  devServer: {
+    host: '0.0.0.0',
+  },
+
   // Modules
   modules: [
     '@unocss/nuxt',

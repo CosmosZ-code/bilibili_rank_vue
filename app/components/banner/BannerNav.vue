@@ -19,7 +19,9 @@
     <div class="nav-right">
       <ul class="nav-menu nav-menu-right">
         <li class="nav-item"><a href="//t.bilibili.com" class="nav-link">动态</a></li>
-        <li class="nav-item"><a href="//www.bilibili.com/history" class="nav-link">历史</a></li>
+        <li class="nav-item">
+          <HistoryDropdown />
+        </li>
       </ul>
       <BilibiliLogin />
     </div>

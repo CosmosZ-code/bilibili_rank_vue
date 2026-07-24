@@ -6,7 +6,7 @@
     </button>
 
     <!-- 已登录 -->
-    <div v-else class="user-info" @click="showMenu = !showMenu">
+    <div v-else class="user-info" @mouseenter="onUserEnter" @mouseleave="onUserLeave">
       <img
         v-if="user?.bilibiliFace"
         :src="user.bilibiliFace"
@@ -15,8 +15,8 @@
         referrerpolicy="no-referrer"
       />
       <span class="username">{{ user?.bilibiliUname }}</span>
-      <div v-if="showMenu" class="dropdown-menu">
-        <button class="logout-btn" @click.stop="doLogout">退出登录</button>
+      <div v-if="isMenuOpen" class="dropdown-menu" @mouseenter="onMenuEnter" @mouseleave="onUserLeave">
+        <button class="logout-btn" @click="doLogout">退出登录</button>
       </div>
     </div>
 
@@ -71,8 +71,28 @@ const { user, isLoggedIn, fetchUser, logout } = useAuth()
 const showQr = ref(false)
 const qrStatus = ref<'loading' | 'pending' | 'scanned' | 'expired' | 'success' | 'error'>('loading')
 const qrCanvasRef = ref<HTMLCanvasElement | null>(null)
-const showMenu = ref(false)
+const isMenuOpen = ref(false)
+let menuCloseTimer: ReturnType<typeof setTimeout> | null = null
 let pollTimer: ReturnType<typeof setInterval> | null = null
+
+function onUserEnter() {
+  clearMenuTimer()
+  isMenuOpen.value = true
+}
+function onMenuEnter() {
+  clearMenuTimer()
+}
+function onUserLeave() {
+  menuCloseTimer = setTimeout(() => {
+    isMenuOpen.value = false
+  }, 200)
+}
+function clearMenuTimer() {
+  if (menuCloseTimer) {
+    clearTimeout(menuCloseTimer)
+    menuCloseTimer = null
+  }
+}
 let qrcodeKey = ''
 
 /** 生成二维码到 canvas */
@@ -153,7 +173,7 @@ function closeQr() {
 }
 
 async function doLogout() {
-  showMenu.value = false
+  isMenuOpen.value = false
   await logout()
 }
 
@@ -214,27 +234,28 @@ onMounted(() => {
   position: absolute;
   top: 100%;
   right: 0;
-  margin-top: 4px;
-  background: #2a2a2a;
-  border-radius: 6px;
-  padding: 4px;
-  min-width: 100px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-  z-index: 100;
+  margin-top: 6px;
+  background: #fff;
+  border-radius: 8px;
+  padding: 8px 0;
+  min-width: 120px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  z-index: 200;
 }
 .logout-btn {
   width: 100%;
-  padding: 6px 12px;
+  padding: 10px 16px;
   border: none;
   background: transparent;
-  color: #ff6b6b;
+  color: #333;
   font-size: 13px;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: 0;
   text-align: left;
+  transition: background-color 0.15s;
 }
 .logout-btn:hover {
-  background: rgba(255, 107, 107, 0.15);
+  background: #eaeaea;
 }
 
 /* QR overlay */

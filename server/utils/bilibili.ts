@@ -225,7 +225,7 @@ export async function getBilibiliRanking(): Promise<RankingVideo[]> {
  *
  * @param pages - 需要拉取的页数
  */
-export async function getBilibiliPopular(pages: number = 4): Promise<RankingVideo[]> {
+export async function getBilibiliPopular(pages: number = 4, cookie?: string): Promise<RankingVideo[]> {
   const results: RankingVideo[] = []
 
   for (let pn = 1; pn <= pages; pn++) {
@@ -234,6 +234,7 @@ export async function getBilibiliPopular(pages: number = 4): Promise<RankingVide
         '/x/web-interface/popular',
         {
           params: { pn: String(pn), ps: '50' },
+          cookie,
         },
       )
       const data = response.data as any

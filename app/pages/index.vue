@@ -129,6 +129,20 @@ const filteredVideos = computed(() => {
   return list
 })
 
+// 客户端：已登录用户动态追加个性化热门视频
+if (import.meta.client) {
+  watch(videosData, async () => {
+    try {
+      const extra = await $fetch<Record<string, any>>('/api/ranking/personalized')
+      if (extra && Object.keys(extra).length > 0 && videosData.value) {
+        Object.assign(videosData.value, extra)
+      }
+    } catch {
+      // 静默失败，全局数据已展示
+    }
+  }, { immediate: true })
+}
+
 const { showButton: showBackToTop, scrollToTop } = useScrollToTop(300)
 
 function onBackToTop() {

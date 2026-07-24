@@ -22,6 +22,8 @@ const expectedComponents = [
   'common/SearchBox.vue',
   'nav/NavDropdown.vue',
   'nav/NavDropdownItem.vue',
+  'nav/HistoryDropdown.vue',
+  'auth/BilibiliLogin.vue',
 ]
 
 describe('组件文件完整性', () => {
@@ -117,7 +119,7 @@ describe('组件关键内容验证', () => {
     expect(content).toContain('番剧')
     expect(content).toContain('直播')
     expect(content).toContain('动态')
-    expect(content).toContain('历史')
+    expect(content).toContain('HistoryDropdown')
   })
 
   it('BannerLayer 支持 img 和 video 两种标签', async () => {

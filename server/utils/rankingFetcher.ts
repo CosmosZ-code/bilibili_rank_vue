@@ -109,15 +109,16 @@ async function fetchOnlineCountBatch(
  * 3. 批量获取每个视频的在线人数（每批 5 个）
  * 4. 校验封面链接和播放量有效性
  *
+ * @param cookie - 可选，传入用户的 B站 Cookie 使热门结果个性化
  * @returns RankingFetchResult — 正常数据 + 失败追踪；null — B站完全不可用
  */
-export async function fetchRankingData(): Promise<RankingFetchResult | null> {
+export async function fetchRankingData(cookie?: string): Promise<RankingFetchResult | null> {
   const apiTimeout = 10_000
 
   // 1. 并发请求排行榜 + 热门（带超时）
   const [ranking, popular] = await Promise.all([
     withTimeout(getBilibiliRanking().catch(() => []), apiTimeout, []),
-    withTimeout(getBilibiliPopular(2).catch(() => []), apiTimeout, []),
+    withTimeout(getBilibiliPopular(2, cookie).catch(() => []), apiTimeout, []),
   ])
 
   // 2. 合并 + 去重
@@ -310,4 +311,73 @@ export async function retryFailedMetadata(
   }
 
   return { data: mergedData, stillEmptyPic, stillZeroStat }
+}
+
+/**
+ * 获取用户个性化的热门视频（仅增量部分）
+ *
+ * 与全局 ranking:latest 对比，排除已存在的 BV 号，
+ * 只返回该用户独有（不在全局排行中）的新视频。
+ *
+ * @param cookie - 用户的 B站 Cookie
+ * @returns VideosDataMap — 仅包含增量视频；null — 拉取失败或 cookie 无效
+ */
+export async function fetchPersonalizedOnly(cookie: string): Promise<VideosDataMap | null> {
+  const apiTimeout = 10_000
+
+  // 1. 拉取全局缓存，获取已有 BV 号集合
+  const globalCache = await useStorage('cache').getItem<{
+    data: VideosDataMap
+    timestamp: number
+  }>('ranking:latest')
+
+  const existingBvids = new Set(
+    globalCache?.data ? Object.keys(globalCache.data) : [],
+  )
+
+  // 2. 拉取用户个性化热门
+  const popular = await withTimeout(
+    getBilibiliPopular(2, cookie).catch(() => []),
+    apiTimeout,
+    [],
+  )
+
+  if (popular.length === 0) return null
+
+  // 3. 排除全局已有的视频
+  const newVideos = popular.filter((v) => !existingBvids.has(v.bvid))
+  if (newVideos.length === 0) return {}
+
+  // 4. 批量获取在线人数
+  const results: VideosDataMap = {}
+  const maxResults = Math.min(newVideos.length, 20) // 增量最多 20 个
+
+  for (let i = 0; i < maxResults; i += 5) {
+    const batch = newVideos.slice(i, i + 5)
+    const { results: batchResults } = await fetchOnlineCountBatch(batch, apiTimeout)
+
+    for (const item of batchResults) {
+      const video = newVideos.find((v) => v.bvid === item.bvid)
+      if (!video) continue
+
+      const statView = video.stat?.view || 0
+      const statDanmaku = video.stat?.danmaku || 0
+      const pic = ensureHttps(video.pic || '')
+
+      results[item.bvid] = {
+        title: video.title || '',
+        owner: video.owner?.name || '',
+        mid: String(video.owner?.mid || ''),
+        pic,
+        online_count: item.onlineCount.formatted,
+        count_num: item.onlineCount.raw,
+        play_count_num: statView,
+        danmaku_count_num: statDanmaku,
+        play_count: formatCount(statView),
+        danmaku_count: formatCount(statDanmaku),
+      }
+    }
+  }
+
+  return results
 }
