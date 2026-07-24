@@ -35,8 +35,8 @@ RUN mkdir -p .output/server/node_modules/sql.js/dist && \
 # ============================================================
 FROM node:22-alpine
 
-# Install tini for proper signal handling
-RUN apk add --no-cache tini
+# Install tini (signal handling) and su-exec (user switching for entrypoint)
+RUN apk add --no-cache tini su-exec
 
 WORKDIR /app
 
@@ -47,6 +47,13 @@ RUN addgroup -g 1001 -S nodejs && \
 # Copy only the production output from build stage
 COPY --from=build --chown=nuxt:nodejs /app/.output /app/.output
 
+# Create data directory (fallback for non-volume scenarios)
+RUN mkdir -p /app/data && chown nuxt:nodejs /app/data
+
+# Entrypoint script — runs as root, fixes volume permissions, then drops to nuxt
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
 # Server environment
 ENV NITRO_HOST=0.0.0.0
 ENV NITRO_PORT=3000
@@ -54,11 +61,10 @@ ENV NITRO_PORT=3000
 EXPOSE 3000
 
 # Health check — uses the /api/health endpoint
+# Use 127.0.0.1 instead of localhost because Node.js listens on IPv4 only (0.0.0.0),
+# and wget would try IPv6 (::1) first when resolving "localhost", causing Connection refused.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD wget -qO- http://localhost:3000/api/health || exit 1
+    CMD wget -qO- http://127.0.0.1:3000/api/health || exit 1
 
-# Run as non-root
-USER nuxt
-
-ENTRYPOINT ["/sbin/tini", "--"]
-CMD ["node", ".output/server/index.mjs"]
+# Run as non-root — the entrypoint script applies chown before switching to nuxt via su-exec
+ENTRYPOINT ["/sbin/tini", "--", "/docker-entrypoint.sh"]
