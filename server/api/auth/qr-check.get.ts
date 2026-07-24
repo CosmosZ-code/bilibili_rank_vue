@@ -16,7 +16,7 @@ export default defineEventHandler(async (event) => {
   if (!qrcodeKey) {
     throw createError({
       statusCode: 400,
-      statusMessage: '缺少 qrcode_key 参数',
+      message: '缺少 qrcode_key 参数',
     })
   }
 

@@ -13,7 +13,7 @@ export default defineEventHandler(async (event) => {
   if (!cookie) {
     throw createError({
       statusCode: 401,
-      statusMessage: '未登录 — 请先通过 B站 扫码登录',
+      message: '未登录 — 请先通过 B站 扫码登录',
     })
   }
 

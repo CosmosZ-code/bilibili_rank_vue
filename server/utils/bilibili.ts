@@ -179,7 +179,7 @@ export async function bilibiliRequest<T>(
   if (response.code !== 0) {
     throw createError({
       statusCode: 502,
-      statusMessage: `B站API错误 [${response.code}]: ${response.message}`,
+      message: `B站API错误 [${response.code}]: ${response.message}`,
     })
   }
 
@@ -434,7 +434,7 @@ export async function generateQrCode(): Promise<QrCodeResult> {
   if (!response.ok) {
     throw createError({
       statusCode: 502,
-      statusMessage: `B站二维码生成失败: HTTP ${response.status}`,
+      message: `B站二维码生成失败: HTTP ${response.status}`,
     })
   }
 
@@ -447,7 +447,7 @@ export async function generateQrCode(): Promise<QrCodeResult> {
   if (body.code !== 0) {
     throw createError({
       statusCode: 502,
-      statusMessage: `B站二维码生成失败 [${body.code}]: ${body.message}`,
+      message: `B站二维码生成失败 [${body.code}]: ${body.message}`,
     })
   }
 
@@ -495,7 +495,7 @@ export async function pollQrCode(qrcodeKey: string, cookies?: string): Promise<Q
   if (!response.ok) {
     throw createError({
       statusCode: 502,
-      statusMessage: `B站扫码轮询失败: HTTP ${response.status}`,
+      message: `B站扫码轮询失败: HTTP ${response.status}`,
     })
   }
 
@@ -584,7 +584,7 @@ export async function getNavUserInfo(cookie: string): Promise<BilibiliUserInfo> 
     }
   } catch (err: any) {
     // code=-101 表示账号未登录，这是正常状态而非错误
-    if (err.statusCode === 502 && err.statusMessage?.includes('-101')) {
+    if (err.statusCode === 502 && err.message?.includes('-101')) {
       return { mid: 0, uname: '', face: '', isLogin: false }
     }
     throw err

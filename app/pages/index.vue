@@ -97,9 +97,20 @@ const { data: tsData } = await useAsyncData('ranking-timestamp', () =>
   $fetch('/api/ranking/timestamp'),
 )
 
+// 日期格式选项：固定格式确保服务端/客户端渲染一致，避免 hydration mismatch
+const DATE_LOCALE_OPTIONS: Intl.DateTimeFormatOptions = {
+  year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', second: '2-digit',
+  hour12: false,
+}
+
+function formatDate(ts: number | Date): string {
+  return new Date(ts).toLocaleString('zh-CN', DATE_LOCALE_OPTIONS)
+}
+
 const updateTime = ref(
   tsData.value?.timestamp
-    ? new Date(tsData.value.timestamp).toLocaleString('zh-CN')
+    ? formatDate(tsData.value.timestamp)
     : '加载中...',
 )
 const lastDataTimestamp = ref(tsData.value?.timestamp ?? 0)
@@ -110,12 +121,11 @@ const { data: videosData, pending: isLoading, error: fetchError } = useFetch<Vid
   {
     key: 'ranking',
     server: true,
-    lazy: true,
     onResponse({ response }) {
       const ts = response.headers.get('X-Data-Timestamp')
       if (ts) {
         lastDataTimestamp.value = Number(ts)
-        updateTime.value = new Date(Number(ts)).toLocaleString('zh-CN')
+        updateTime.value = formatDate(Number(ts))
       }
     },
   },

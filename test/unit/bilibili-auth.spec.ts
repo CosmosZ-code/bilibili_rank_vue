@@ -17,10 +17,10 @@ const mockFetch = vi.fn()
 
 function setupGlobals() {
   ;(globalThis as any).$fetch = mock$Fetch
-  ;(globalThis as any).createError = (opts: { statusCode: number; statusMessage: string }) => {
-    const err = new Error(opts.statusMessage) as Error & { statusCode: number; statusMessage: string }
+  ;(globalThis as any).createError = (opts: { statusCode: number; message: string; statusMessage?: string }) => {
+    const err = new Error(opts.message) as Error & { statusCode: number; message: string }
     err.statusCode = opts.statusCode
-    err.statusMessage = opts.statusMessage
+    err.message = opts.message
     return err
   }
   vi.stubGlobal('fetch', mockFetch)

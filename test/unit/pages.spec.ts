@@ -78,6 +78,80 @@ describe('index.vue 页面内容验证', () => {
   })
 })
 
+describe('createError 使用 message 而非 statusMessage', () => {
+  const serverApiFiles = [
+    'server/api/auth/qr-check.get.ts',
+    'server/api/favorites.get.ts',
+    'server/api/history.get.ts',
+    'server/api/user/preferences.get.ts',
+    'server/api/user/preferences.put.ts',
+  ]
+
+  const serverUtilFiles = [
+    'server/utils/auth.ts',
+    'server/utils/bilibili.ts',
+  ]
+
+  const allServerFiles = [...serverApiFiles, ...serverUtilFiles]
+
+  it('所有 createError 调用使用 message 而非 statusMessage', async () => {
+    const fs = await import('node:fs/promises')
+
+    for (const file of allServerFiles) {
+      const content = await fs.readFile(resolve(rootDir, file), 'utf-8')
+
+      // 提取所有 createError({...}) 调用
+      const calls = content.match(/createError\(\{[\s\S]*?\}\)/g) || []
+
+      for (const call of calls) {
+        // 每个 createError 调用必须包含 message:（新写法）
+        expect(
+          call,
+          `${file}: createError 必须使用 message 而非 statusMessage\n调用内容: ${call}`,
+        ).toMatch(/message:/)
+      }
+    }
+  })
+
+  it('所有服务端文件不再包含 statusMessage', async () => {
+    const fs = await import('node:fs/promises')
+
+    for (const file of allServerFiles) {
+      const content = await fs.readFile(resolve(rootDir, file), 'utf-8')
+      expect(
+        content,
+        `${file} 不应再包含 statusMessage`,
+      ).not.toContain('statusMessage')
+    }
+  })
+
+  it('消费者代码使用 err.message 而非 err.statusMessage', async () => {
+    const fs = await import('node:fs/promises')
+    const content = await fs.readFile(
+      resolve(rootDir, 'server/utils/bilibili.ts'),
+      'utf-8',
+    )
+
+    // 读取 err.message 的地方（原为 err.statusMessage）
+    expect(content).toContain('err.message')
+    expect(content).not.toContain('err.statusMessage')
+  })
+
+  it('dateFormat 使用固定 options（toLocaleString 带 options）', async () => {
+    const fs = await import('node:fs/promises')
+    const indexContent = await fs.readFile(
+      resolve(rootDir, 'app/pages/index.vue'),
+      'utf-8',
+    )
+
+    // index.vue 中不应再出现无 options 的 toLocaleString('zh-CN')
+    const bareLocaleMatches = indexContent.match(
+      /toLocaleString\('zh-CN'\)(?!\s*[,;])/g,
+    )
+    expect(bareLocaleMatches).toBeNull()
+  })
+})
+
 describe('app.vue 内容验证', () => {
   it('包含 NuxtLayout 和 NuxtPage', async () => {
     const fs = await import('node:fs/promises')

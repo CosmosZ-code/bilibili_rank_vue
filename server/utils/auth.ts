@@ -284,7 +284,7 @@ export async function handleLoginSuccess(
   if (!userInfo.isLogin || !userInfo.mid) {
     throw createError({
       statusCode: 401,
-      statusMessage: '获取 B站 用户信息失败，Cookie 可能无效',
+      message: '获取 B站 用户信息失败，Cookie 可能无效',
     })
   }
 
