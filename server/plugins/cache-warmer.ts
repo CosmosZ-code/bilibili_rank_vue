@@ -13,8 +13,9 @@
  * 不依赖 Nitro cron Task 系统，在 dev / production / Docker 中行为一致。
  */
 import { fetchAllRankings, retryFailedVideos, retryFailedMetadata } from '../utils/rankingFetcher'
+import { fetchAllLiveRooms, writeLiveRoomsCache, LIVE_CACHE_KEY } from '../utils/liveRoomFetcher'
 import { prefetchBiliTicket } from '../utils/bilibili'
-import { MOCK_RANKING } from '../utils/mockData'
+import { MOCK_RANKING, MOCK_LIVE_ROOMS_MAP } from '../utils/mockData'
 import { COMBINED_CACHE_KEY, VALID_RANKING_RIDS } from '../utils/rankingConstants'
 import {
   resolveRefreshInterval,
@@ -459,6 +460,66 @@ export default defineNitroPlugin((nitroApp) => {
     }
   }
 
+  // ============================================================
+  // 直播缓存预热（独立计时器，复用 normalInterval 和退避算法）
+  // ============================================================
+  let liveTimer: ReturnType<typeof setTimeout> | null = null
+  let liveConsecutiveFailures = 0
+
+  /**
+   * 直播缓存完整刷新：调用 fetchAllLiveRooms 聚合全站+分区，写入缓存
+   *
+   * 失败处理：保留旧缓存（若空则写 mock 降级），按退避算法重试
+   */
+  async function refreshLive() {
+    try {
+      const t0 = Date.now()
+      const result = await fetchAllLiveRooms()
+
+      if (result === null) {
+        // B站完全不可用：保留旧缓存，仅在空时降级
+        liveConsecutiveFailures++
+        const delay = calculateBackoffDelay(liveConsecutiveFailures - 1, normalInterval)
+        const cached = await useStorage('cache').getItem<{ data: any[]; timestamp: number }>(LIVE_CACHE_KEY)
+        if (!cached?.data || cached.data.length === 0) {
+          await useStorage('cache').setItem(LIVE_CACHE_KEY, {
+            data: Object.values(MOCK_LIVE_ROOMS_MAP),
+            timestamp: Date.now(),
+          })
+          console.warn('[cache-warmer:live] B站不可用且缓存为空，已写入 mock 降级')
+        } else {
+          console.warn(`[cache-warmer:live] B站不可用，保留现有缓存（${cached.data.length} 条）`)
+        }
+        console.warn(`[cache-warmer:live] 拉取失败，${delay / 1000}s 后重试`)
+        scheduleNextLiveRefresh(delay)
+        return
+      }
+
+      // 成功：写入全站 + 各分区缓存
+      await writeLiveRoomsCache(result)
+      liveConsecutiveFailures = 0
+
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
+      const totalAreas = result.successAreas + result.failedAreas.length
+      console.log(
+        `[cache-warmer:live] 缓存已刷新: 全站 ${result.combined.length} 条，` +
+        `${result.successAreas}/${totalAreas} 个分区成功 (${elapsed}s)` +
+        (result.failedAreas.length > 0
+          ? `，失败: ${result.failedAreas.map((a) => a.name).join('、')}`
+          : ''),
+      )
+      scheduleNextLiveRefresh(normalInterval)
+    } catch (err: any) {
+      console.error('[cache-warmer:live] 刷新异常:', err.message || err)
+      scheduleNextLiveRefresh(normalInterval)
+    }
+  }
+
+  function scheduleNextLiveRefresh(delayMs: number) {
+    if (liveTimer) clearTimeout(liveTimer)
+    liveTimer = setTimeout(refreshLive, delayMs)
+  }
+
   /**
    * 清理所有计时器
    */
@@ -483,6 +544,10 @@ export default defineNitroPlugin((nitroApp) => {
       clearTimeout(popularState.timer)
       popularState.timer = null
     }
+    if (liveTimer) {
+      clearTimeout(liveTimer)
+      liveTimer = null
+    }
   }
 
   // 启动时预取 bili_ticket（避免首次 API 请求因 GenWebTicket 与 B站 API 间隔过近触发风控）
@@ -493,6 +558,11 @@ export default defineNitroPlugin((nitroApp) => {
     await new Promise((r) => setTimeout(r, 1000))
     console.log(`[cache-warmer] 开始预热排行榜缓存... (刷新间隔: ${normalInterval / 1000}s)`)
     await refresh()
+
+    // 直播预热：延后 2s，避免与视频侧 API 请求背靠背触发风控
+    await new Promise((r) => setTimeout(r, 2000))
+    console.log(`[cache-warmer:live] 开始预热直播缓存... (刷新间隔: ${normalInterval / 1000}s)`)
+    await refreshLive()
   })
 
   // 服务器关闭时清理计时器

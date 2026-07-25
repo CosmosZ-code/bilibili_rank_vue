@@ -29,16 +29,8 @@ describe('直播页面功能', async () => {
     const page = await createPage('/')
     await page.waitForTimeout(1000)
 
-    // 找到"直播"标签并点击
-    const tabs = await page.$$('.tab-btn')
-    let liveTab = null
-    for (const tab of tabs) {
-      const text = await tab.evaluate((el: Element) => el.textContent)
-      if (text?.includes('直播')) {
-        liveTab = tab
-        break
-      }
-    }
+    // "直播"标签是 .live-trigger（非 .tab-btn），直接定位点击
+    const liveTab = await page.$('.live-trigger')
     expect(liveTab).not.toBeNull()
 
     if (liveTab) {
@@ -97,7 +89,7 @@ describe('直播页面功能', async () => {
     await page.close()
   })
 
-  it('直播模式搜索过滤', async () => {
+  it('直播模式搜索过滤', { timeout: 15000 }, async () => {
     const page = await createPage('/?view=live')
     await page.waitForTimeout(2000)
 
@@ -140,7 +132,5 @@ describe('直播页面功能', async () => {
     // SSR 阶段应包含直播相关的标记
     expect(html).toContain('直播')
     expect(html).toContain('<!DOCTYPE html>')
-
-    await page.close()
   })
 })

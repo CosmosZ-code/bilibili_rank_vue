@@ -816,17 +816,13 @@ export interface LiveRoomRawItem {
   system_cover?: string
   face: string
   link: string
-  /** 子分区名，如 "英雄联盟" */
-  area_name?: string
-  /** 一级分区名，如 "网游" */
-  parent_name?: string
-  /** 一级分区 ID */
-  parent_id?: number
-  /** v2 分区字段（备选） */
   area_v2_id?: number
   area_v2_name?: string
+  area_name?: string
+  parent_id?: number
   parent_area_id?: number
   parent_area_name?: string
+  parent_name?: string
 }
 
 /** 直播分区导航项 */

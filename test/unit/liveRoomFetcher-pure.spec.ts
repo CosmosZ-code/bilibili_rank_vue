@@ -4,7 +4,7 @@
  * 测试 sortAndFilterLiveRooms 的排序、搜索过滤、分区过滤逻辑。
  * 遵循现有测试惯例：内联实现纯函数，避免导入 Nuxt 上下文。
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { LiveRoomInfo } from '../../app/types'
 
 // ============================================================
@@ -320,5 +320,92 @@ describe('liveAreaCacheKey — 缓存 key 生成', () => {
 
   it('areaId=2 返回分区 key', () => {
     expect(liveAreaCacheKey(2)).toBe('live:rooms:area:2')
+  })
+})
+
+// ============================================================
+// writeLiveRoomsCache 测试（通过 vi.stubGlobal 模拟 useStorage）
+// ============================================================
+describe('writeLiveRoomsCache — 写入全站+各分区缓存', () => {
+  beforeEach(() => {
+    // 准备内存存储
+    const store = new Map<string, any>()
+    const mockStorage = {
+      getItem: vi.fn(async (k: string) => store.get(k)),
+      setItem: vi.fn(async (k: string, v: any) => { store.set(k, v) }),
+    }
+    vi.stubGlobal('useStorage', () => mockStorage)
+    // 通过共享对象让测试可访问
+    ;(globalThis as any).__testStore = store
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    delete (globalThis as any).__testStore
+  })
+
+  it('同时写入全站和各分区缓存（key 和数据正确）', async () => {
+    const { writeLiveRoomsCache } = await import('../../server/utils/liveRoomFetcher')
+
+    const room1: LiveRoomInfo = {
+      title: '游戏直播', uname: '主播A', uid: 1, roomid: 100,
+      online: 5000, online_formatted: '5000', cover: '', face: '',
+      area_v2_name: '英雄联盟', parent_area_name: '网游', parent_area_id: 2,
+      link: 'https://live.bilibili.com/100',
+    }
+    const room2: LiveRoomInfo = {
+      title: '娱乐直播', uname: '主播B', uid: 2, roomid: 200,
+      online: 3000, online_formatted: '3000', cover: '', face: '',
+      area_v2_name: '聊天室', parent_area_name: '娱乐', parent_area_id: 1,
+      link: 'https://live.bilibili.com/200',
+    }
+
+    const result = {
+      combined: [room1, room2],
+      perArea: { 2: [room1], 1: [room2] },
+    }
+
+    const ts = await writeLiveRoomsCache(result)
+
+    const store: Map<string, any> = (globalThis as any).__testStore
+
+    // 验证全站缓存
+    expect(store.get('live:rooms:all')).toEqual({ data: result.combined, timestamp: ts })
+
+    // 验证分区 2 缓存
+    expect(store.get('live:rooms:area:2')).toEqual({ data: result.perArea[2], timestamp: ts })
+
+    // 验证分区 1 缓存
+    expect(store.get('live:rooms:area:1')).toEqual({ data: result.perArea[1], timestamp: ts })
+  })
+
+  it('所有缓存共享同一时间戳', async () => {
+    const { writeLiveRoomsCache } = await import('../../server/utils/liveRoomFetcher')
+
+    const ts = await writeLiveRoomsCache({
+      combined: [],
+      perArea: { 5: [], 6: [] },
+    })
+
+    const store: Map<string, any> = (globalThis as any).__testStore
+    expect(store.get('live:rooms:all').timestamp).toBe(ts)
+    expect(store.get('live:rooms:area:5').timestamp).toBe(ts)
+    expect(store.get('live:rooms:area:6').timestamp).toBe(ts)
+  })
+
+  it('无分区数据时也写入全站缓存', async () => {
+    const { writeLiveRoomsCache } = await import('../../server/utils/liveRoomFetcher')
+
+    const room: LiveRoomInfo = {
+      title: 't', uname: 'u', uid: 1, roomid: 1, online: 1, online_formatted: '1',
+      cover: '', face: '', area_v2_name: '', parent_area_name: '', parent_area_id: 0,
+      link: '',
+    }
+
+    await writeLiveRoomsCache({ combined: [room], perArea: {} })
+
+    const store: Map<string, any> = (globalThis as any).__testStore
+    expect(store.has('live:rooms:all')).toBe(true)
+    expect(store.has('live:rooms:area:0')).toBe(false)  // 不写空分区
   })
 })

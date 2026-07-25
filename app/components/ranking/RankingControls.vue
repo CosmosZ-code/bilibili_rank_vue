@@ -38,7 +38,7 @@
           视频
         </button>
 
-        <!-- 直播（带悬浮分区下拉，触屏下点按展开） -->
+        <!-- 直播（带悬浮分区下拉） -->
         <div
           ref="liveDropdownRef"
           class="live-dropdown"
@@ -91,11 +91,14 @@ const emit = defineEmits<{
   'update:areaId': [value: number]
 }>()
 
+// ============================================================
+// 触屏设备检测 + 两阶段点按
+// ============================================================
 const { isTouch } = useTouchDevice()
+const liveDropdownRef = ref<HTMLDivElement | null>(null)
 
-// 悬浮下拉状态
+// 悬浮下拉状态（桌面：hover 控制；触屏：点击控制）
 const dropdownOpen = ref(false)
-const liveDropdownRef = ref<HTMLElement | null>(null)
 let closeTimer: ReturnType<typeof setTimeout> | null = null
 
 function onDropdownEnter() {
@@ -112,12 +115,32 @@ function onDropdownLeave() {
   }, 200)
 }
 
-/** 点击下拉菜单外部时关闭（仅触屏设备） */
+function selectArea(id: number) {
+  if (props.viewMode !== 'live') {
+    emit('update:viewMode', 'live')
+  }
+  emit('update:areaId', id)
+  dropdownOpen.value = false
+}
+
+// 点击"直播"文字：桌面直接切全站；触屏两阶段（首次展开，二次切全站）
+function clickLive() {
+  if (isTouch.value && !dropdownOpen.value) {
+    // 触屏首次点按：仅展开下拉
+    dropdownOpen.value = true
+    return
+  }
+  // 桌面点击 或 触屏二次点击：切直播全站
+  emit('update:viewMode', 'live')
+  emit('update:areaId', 0)
+  dropdownOpen.value = false
+}
+
+// 点击 document 外部关闭下拉（仅触屏设备开启时有效）
 function onDocumentClick(e: MouseEvent) {
   if (!isTouch.value || !dropdownOpen.value) return
   const el = liveDropdownRef.value
-  if (!el) return
-  if (!el.contains(e.target as Node)) {
+  if (el && !el.contains(e.target as Node)) {
     dropdownOpen.value = false
   }
 }
@@ -129,29 +152,6 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('click', onDocumentClick)
 })
-
-function selectArea(id: number) {
-  // 如果当前不是直播模式，先切到直播
-  if (props.viewMode !== 'live') {
-    emit('update:viewMode', 'live')
-  }
-  emit('update:areaId', id)
-  dropdownOpen.value = false
-}
-
-// 点击"直播"文字
-// 触屏设备：第一次点按展开下拉，第二次点按切换到直播模式
-// 桌面设备：直接切换到直播模式（下拉由 hover 控制）
-function clickLive() {
-  if (isTouch.value && !dropdownOpen.value) {
-    // 触屏首次点按：仅展开下拉菜单，不切换模式
-    dropdownOpen.value = true
-    return
-  }
-  emit('update:viewMode', 'live')
-  emit('update:areaId', 0)
-  dropdownOpen.value = false
-}
 </script>
 
 <style scoped>

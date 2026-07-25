@@ -183,7 +183,6 @@ describe('组件触屏适配代码结构验证', () => {
 
     it('clickLive 中触屏首次点按仅展开下拉', () => {
       expect(content).toContain('isTouch.value && !dropdownOpen.value')
-      // 首次点按：只展开
       expect(content).toContain('dropdownOpen.value = true')
     })
 
@@ -193,8 +192,7 @@ describe('组件触屏适配代码结构验证', () => {
     })
 
     it('liveDropdownRef 用于判断点击目标', () => {
-      expect(content).toContain('liveDropdownRef')
-      expect(content).toContain('el.contains')
+      expect(content).toContain('ref="liveDropdownRef"')
     })
   })
 

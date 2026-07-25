@@ -129,7 +129,7 @@ describe('排行榜降级逻辑', async () => {
     let headerTs = ''
     const data = await $fetch<Record<string, any>>('/api/ranking', {
       onResponse({ response }) {
-        headerTs = (response.headers as any)['x-data-timestamp'] || ''
+        headerTs = response.headers.get('x-data-timestamp') || ''
       },
     })
     expect(data.timestamp).toBeGreaterThan(0)

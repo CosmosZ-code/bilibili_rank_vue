@@ -105,7 +105,7 @@ describe('cache-warmer 定时刷新', async () => {
     expect(entries.length).toBeGreaterThan(0)
 
     // 检查第一个视频的字段完整性
-    const firstVideo = entries[0][1]
+    const firstVideo = data.items[0]
     expect(firstVideo).toHaveProperty('title')
     expect(firstVideo).toHaveProperty('owner')
     expect(firstVideo).toHaveProperty('mid')

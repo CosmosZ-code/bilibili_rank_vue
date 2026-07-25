@@ -50,8 +50,6 @@ function toLiveRoomInfo(room: LiveRoomRawItem): LiveRoomInfo {
     online_formatted: formatCount(room.online || 0),
     cover: room.cover || '',
     face: room.face || '',
-    // area_v2_name 和 parent_area_name 不在 getRoomList 的响应中
-    // 实际字段是 area_name（子分区名）和 parent_name（一级分区名）
     area_v2_name: room.area_v2_name || room.area_name || '',
     parent_area_name: room.parent_area_name || room.parent_name || '',
     parent_area_id: room.parent_area_id ?? room.parent_id ?? 0,
@@ -195,18 +193,26 @@ export async function fetchLiveAreas(): Promise<Array<{ id: number; name: string
  * 3. 按 roomid 去重合并为全站聚合
  * 4. 同时返回各分区独立数据用于分区缓存
  *
- * @returns combined — 全站聚合去重列表；perArea — 各分区独立列表；null — B站不可用
+ * @returns result — 含 combined/perArea/successAreas/failedAreas/areasLoaded；null — B站完全不可用
  */
 export async function fetchAllLiveRooms(): Promise<{
   combined: LiveRoomInfo[]
   perArea: Record<number, LiveRoomInfo[]>
+  /** 拉取成功的分区数 */
+  successAreas: number
+  /** 拉取失败的分区列表（含名称便于日志） */
+  failedAreas: Array<{ id: number; name: string }>
+  /** 分区列表是否获取成功（false 表示 getLiveAreas 失败，回退到仅全站） */
+  areasLoaded: boolean
 } | null> {
   const combined = new Map<number, LiveRoomInfo>()
   const perArea: Record<number, LiveRoomInfo[]> = {}
+  const failedAreas: Array<{ id: number; name: string }> = []
 
   // 1. 获取分区列表
   const areas = await fetchLiveAreas()
-  if (areas.length === 0) {
+  const areasLoaded = areas.length > 0
+  if (!areasLoaded) {
     console.warn('[fetchAllLiveRooms] 无法获取分区列表，回退到仅全站')
   }
 
@@ -215,6 +221,7 @@ export async function fetchAllLiveRooms(): Promise<{
   for (const room of allSite) {
     combined.set(room.roomid, room)
   }
+  console.log(`[fetchAllLiveRooms] 全站 baseline: ${allSite.length} 条`)
 
   // 3. 逐个分区
   for (let i = 0; i < areas.length; i++) {
@@ -231,10 +238,13 @@ export async function fetchAllLiveRooms(): Promise<{
             combined.set(room.roomid, room)
           }
         }
+        console.log(`[fetchAllLiveRooms] 分区 ${area.name}(${area.id}): ${rooms.length} 条`)
       } else {
+        failedAreas.push(area)
         console.warn(`[fetchAllLiveRooms] 分区 ${area.name}(${area.id}) 无数据，跳过`)
       }
     } catch (err: any) {
+      failedAreas.push(area)
       console.warn(`[fetchAllLiveRooms] 分区 ${area.name}(${area.id}) 请求失败:`, err.message || err)
     }
 
@@ -248,10 +258,50 @@ export async function fetchAllLiveRooms(): Promise<{
     return null
   }
 
+  console.log(
+    `[fetchAllLiveRooms] 聚合完成: 全站去重 ${combined.size} 条，` +
+    `${Object.keys(perArea).length}/${areas.length} 个分区成功` +
+    (failedAreas.length > 0 ? `，${failedAreas.length} 个失败` : ''),
+  )
+
   return {
     combined: Array.from(combined.values()),
     perArea,
+    successAreas: Object.keys(perArea).length,
+    failedAreas,
+    areasLoaded,
   }
+}
+
+/**
+ * 将 fetchAllLiveRooms 的结果写入缓存（全站 + 各分区）
+ *
+ * 抽取为独立函数，供 getLiveRoomsData（请求路径）和 cache-warmer（定时预热）共用，
+ * 避免重复实现"写全站+各分区"的逻辑。
+ *
+ * @returns 写入的 timestamp（毫秒）
+ */
+export async function writeLiveRoomsCache(result: {
+  combined: LiveRoomInfo[]
+  perArea: Record<number, LiveRoomInfo[]>
+}): Promise<number> {
+  const timestamp = Date.now()
+
+  // 写全站缓存
+  await useStorage('cache').setItem(LIVE_CACHE_KEY, {
+    data: result.combined,
+    timestamp,
+  })
+
+  // 写各分区缓存
+  for (const [id, rooms] of Object.entries(result.perArea)) {
+    await useStorage('cache').setItem(`live:rooms:area:${id}`, {
+      data: rooms,
+      timestamp,
+    })
+  }
+
+  return timestamp
 }
 
 /**
@@ -280,15 +330,8 @@ export async function getLiveRoomsData(areaId?: number): Promise<{
   const result = await fetchAllLiveRooms()
   if (result === null) return null
 
-  const timestamp = Date.now()
-
-  // 写全站缓存
-  await useStorage('cache').setItem(LIVE_CACHE_KEY, { data: result.combined, timestamp })
-
-  // 写各分区缓存
-  for (const [id, rooms] of Object.entries(result.perArea)) {
-    await useStorage('cache').setItem(`live:rooms:area:${id}`, { data: rooms, timestamp })
-  }
+  // 复用 writeLiveRoomsCache 写入全站 + 分区缓存
+  const timestamp = await writeLiveRoomsCache(result)
 
   // 3. 返回请求的分区数据
   if (areaId && areaId > 0 && result.perArea[areaId]) {
