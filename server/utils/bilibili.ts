@@ -336,7 +336,7 @@ export async function getBilibiliRanking(): Promise<RankingVideo[]> {
   const response = await bilibiliRequest<{ list: RankingVideo[] }>(
     '/x/web-interface/ranking/v2',
     {
-      params: { rid: '0', type: 'all', web_location: '1550101' },
+      params: { rid: '0', type: 'all' },
     },
   )
   const data = response.data as any

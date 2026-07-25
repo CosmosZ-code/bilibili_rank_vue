@@ -129,21 +129,7 @@ export async function fetchRankingData(options?: {
   let rankingFailed = false
   let popularFailed = false
 
-  // 1. 拉取排行榜（可跳过）
-  let ranking: RankingVideo[] = []
-  if (!options?.skipRanking) {
-    ranking = await withTimeout(
-      getBilibiliRanking().catch(() => []),
-      apiTimeout,
-      [],
-    )
-    if (ranking.length === 0) rankingFailed = true
-
-    // 排行和热门之间间隔 1 秒
-    await new Promise((r) => setTimeout(r, 1000))
-  }
-
-  // 2. 拉取热门（可跳过）
+  // 1. 拉取热门（可跳过）—— 先行，为 ranking "预热" 连接
   let popular: RankingVideo[] = []
   if (!options?.skipPopular) {
     popular = await withTimeout(
@@ -152,6 +138,20 @@ export async function fetchRankingData(options?: {
       [],
     )
     if (popular.length === 0) popularFailed = true
+
+    // 热门和排行之间间隔 1 秒
+    await new Promise((r) => setTimeout(r, 1000))
+  }
+
+  // 2. 拉取排行榜（可跳过）
+  let ranking: RankingVideo[] = []
+  if (!options?.skipRanking) {
+    ranking = await withTimeout(
+      getBilibiliRanking().catch(() => []),
+      apiTimeout,
+      [],
+    )
+    if (ranking.length === 0) rankingFailed = true
   }
 
   // 3. 合并 + 去重
