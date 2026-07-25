@@ -31,6 +31,10 @@ export default defineNuxtConfig({
     },
     // SQLite 数据库文件路径（默认：项目根目录 data/bilibili_rank.db）
     dbPath: process.env.NUXT_DB_PATH || './data/bilibili_rank.db',
+    // API 防护 — 允许的来源域名（逗号分隔，env: NUXT_API_GUARD_ALLOWED_ORIGINS）
+    apiGuard: {
+      allowedOrigins: process.env.NUXT_API_GUARD_ALLOWED_ORIGINS || 'https://bilibili.zhyv.net',
+    },
   },
 
   // Nitro server config
