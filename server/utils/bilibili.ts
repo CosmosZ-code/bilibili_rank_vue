@@ -317,7 +317,7 @@ export async function bilibiliRequest<T>(
 // ============================================================
 
 /** B站排行榜 API 返回的视频项 */
-interface RankingVideo {
+export interface RankingVideo {
   bvid: string
   cid: number
   title: string

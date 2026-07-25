@@ -7,6 +7,7 @@ import { describe, it, expect } from 'vitest'
 import {
   VALID_RANKING_RIDS,
   DEFAULT_RID,
+  COMBINED_CACHE_KEY,
   rankingCacheKey,
   isValidRid,
 } from '../../server/utils/rankingConstants'
@@ -78,5 +79,11 @@ describe('VALID_RANKING_RIDS', () => {
 describe('DEFAULT_RID', () => {
   it("默认值为 '0'", () => {
     expect(DEFAULT_RID).toBe('0')
+  })
+})
+
+describe('COMBINED_CACHE_KEY', () => {
+  it("值为 'ranking:all'", () => {
+    expect(COMBINED_CACHE_KEY).toBe('ranking:all')
   })
 })

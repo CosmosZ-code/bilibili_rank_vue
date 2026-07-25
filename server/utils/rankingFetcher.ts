@@ -5,6 +5,7 @@
  * 供 API 路由（ranking.get.ts）和后台定时任务（cache-warmer）共同使用。
  */
 import type { VideosDataMap } from '../../app/types'
+import type { RankingVideo } from './bilibili'
 import {
   getBilibiliRanking,
   getBilibiliPopular,
@@ -14,7 +15,7 @@ import {
   dedupByBvid,
   formatCount,
 } from './bilibili'
-import { rankingCacheKey } from './rankingConstants'
+import { COMBINED_CACHE_KEY, VALID_RANKING_RIDS } from './rankingConstants'
 
 /** fetchRankingData 成功时的返回值 */
 export interface RankingFetchResult {
@@ -220,6 +221,143 @@ export async function fetchRankingData(options?: {
 }
 
 /**
+ * 拉取全部分区的排行榜数据，合并到统一 VideosDataMap
+ *
+ * 遍历全部 VALID_RANKING_RIDS（16 个分区），每个分区取 50 条，
+ * 与热门数据合并去重后返回。支持两种模式：
+ * - 全量模式（未传 singleRid）：逐个 rid 遍历，遇风控（返回空）立即停止
+ * - 单 rid 模式（传 singleRid）：只请求指定 rid，用于退避重试
+ *
+ * @param options.singleRid - 单 rid 模式，只请求该分区
+ * @returns RankingFetchResult & { failedRid? } — failedRid 指示在哪个 rid 触发风控
+ */
+export async function fetchAllRankings(options?: {
+  cookie?: string
+  skipRanking?: boolean
+  skipPopular?: boolean
+  existingData?: VideosDataMap
+  singleRid?: string
+}): Promise<(RankingFetchResult & { failedRid?: string }) | null> {
+  const apiTimeout = 10_000
+  let rankingFailed = false
+  let popularFailed = false
+  let failedRid: string | undefined
+
+  // 1. 拉取热门（可跳过）
+  let popular: RankingVideo[] = []
+  if (!options?.skipPopular) {
+    popular = await withTimeout(
+      getBilibiliPopular(2, options?.cookie).catch(() => []),
+      apiTimeout,
+      [],
+    )
+    if (popular.length === 0) popularFailed = true
+
+    // 热门和排行之间间隔 1 秒
+    await new Promise((r) => setTimeout(r, 1000))
+  }
+
+  // 2. 拉取排行榜（逐个 rid）
+  let allRanking: RankingVideo[] = []
+
+  if (!options?.skipRanking) {
+    // 确定要请求的 rid 列表
+    const ridsToFetch = options?.singleRid
+      ? [options.singleRid]
+      : [...VALID_RANKING_RIDS]
+
+    let allEmpty = true
+
+    for (let i = 0; i < ridsToFetch.length; i++) {
+      const rid = ridsToFetch[i]
+
+      const ranking = await withTimeout(
+        getBilibiliRanking(rid).catch(() => []),
+        apiTimeout,
+        [],
+      )
+
+      if (ranking.length > 0) {
+        allRanking.push(...ranking)
+        allEmpty = false
+      } else {
+        // 风控触发：记录失败的 rid，停止处理剩余
+        failedRid = rid
+        break
+      }
+
+      // 单 rid 模式不需要间隔；全量模式每个 rid 间隔 500ms 防风控
+      if (!options?.singleRid && i < ridsToFetch.length - 1) {
+        await new Promise((r) => setTimeout(r, 500))
+      }
+    }
+
+    rankingFailed = allEmpty
+  }
+
+  // 3. 合并 + 去重
+  const merged = dedupByBvid([...allRanking, ...popular])
+
+  if (merged.length === 0 && (!options?.existingData || Object.keys(options.existingData).length === 0)) {
+    return null
+  }
+
+  // 4. 批量获取在线人数（以 existingData 为起点，新数据覆盖同 BVid）
+  const results: VideosDataMap = options?.existingData ? { ...options.existingData } : {}
+  const allFailedBvids: string[] = []
+  const allEmptyPicBvids: string[] = []
+  const allZeroStatBvids: string[] = []
+  const maxResults = Math.min(merged.length, 500)
+
+  for (let i = 0; i < maxResults; i += 5) {
+    const batch = merged.slice(i, i + 5)
+    const { results: batchResults, failedBvids } = await fetchOnlineCountBatch(batch, apiTimeout)
+
+    allFailedBvids.push(...failedBvids)
+
+    for (const item of batchResults) {
+      const video = merged.find((v) => v.bvid === item.bvid)
+      if (!video) continue
+
+      const statView = video.stat?.view || 0
+      const statDanmaku = video.stat?.danmaku || 0
+
+      const pic = ensureHttps(video.pic || '')
+      if (!isValidPic(pic)) {
+        allEmptyPicBvids.push(item.bvid)
+      }
+
+      if (statView === 0) {
+        allZeroStatBvids.push(item.bvid)
+      }
+
+      results[item.bvid] = {
+        title: video.title || '',
+        owner: video.owner?.name || '',
+        mid: String(video.owner?.mid || ''),
+        pic,
+        online_count: item.onlineCount.formatted,
+        count_num: item.onlineCount.raw,
+        play_count_num: statView,
+        danmaku_count_num: statDanmaku,
+        play_count: formatCount(statView),
+        danmaku_count: formatCount(statDanmaku),
+      }
+    }
+  }
+
+  return {
+    data: results,
+    failedBvids: allFailedBvids,
+    emptyPicBvids: allEmptyPicBvids,
+    zeroStatBvids: allZeroStatBvids,
+    rankingFailed: options?.skipRanking ? false : rankingFailed,
+    popularFailed: options?.skipPopular ? false : popularFailed,
+    failedRid,
+  }
+}
+
+/**
  * 重试获取失败视频的在线人数，并将成功结果合并回已有数据
  */
 export async function retryFailedVideos(
@@ -366,7 +504,7 @@ export async function fetchPersonalizedOnly(cookie: string): Promise<VideosDataM
   const globalCache = await useStorage('cache').getItem<{
     data: VideosDataMap
     timestamp: number
-  }>(rankingCacheKey('0'))
+  }>(COMBINED_CACHE_KEY)
 
   const existingBvids = new Set(
     globalCache?.data ? Object.keys(globalCache.data) : [],

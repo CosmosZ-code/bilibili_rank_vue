@@ -12,10 +12,10 @@
  * 刷新间隔通过环境变量 NUXT_CACHE_WARMER_REFRESH_INTERVAL_MS 配置（默认 4 分钟）。
  * 不依赖 Nitro cron Task 系统，在 dev / production / Docker 中行为一致。
  */
-import { fetchRankingData, retryFailedVideos, retryFailedMetadata } from '../utils/rankingFetcher'
+import { fetchAllRankings, retryFailedVideos, retryFailedMetadata } from '../utils/rankingFetcher'
 import { prefetchBiliTicket } from '../utils/bilibili'
 import { MOCK_RANKING } from '../utils/mockData'
-import { rankingCacheKey } from '../utils/rankingConstants'
+import { COMBINED_CACHE_KEY, VALID_RANKING_RIDS } from '../utils/rankingConstants'
 import {
   resolveRefreshInterval,
   calculateBackoffDelay,
@@ -24,7 +24,7 @@ import {
 import type { CacheEntry, VideosDataMap } from '../../app/types'
 
 export default defineNitroPlugin((nitroApp) => {
-  const cacheKey = rankingCacheKey('0')
+  const cacheKey = COMBINED_CACHE_KEY
   const config = useRuntimeConfig()
   const normalInterval = resolveRefreshInterval(
     String(config.cacheWarmer?.refreshIntervalMs ?? ''),
@@ -49,6 +49,16 @@ export default defineNitroPlugin((nitroApp) => {
   const rankingState: EndpointBackoff = { inBackoff: false, failures: 0, successes: 0, timer: null }
   const popularState: EndpointBackoff = { inBackoff: false, failures: 0, successes: 0, timer: null }
 
+  // 排行榜分区队列：当前待重试的 rid（null 表示无待处理或从头开始）
+  let pendingRankingRid: string | null = null
+
+  /** 获取 rid 在 VALID_RANKING_RIDS 中的下一个 rid，若无则返回 null */
+  function getNextRid(currentRid: string): string | null {
+    const idx = VALID_RANKING_RIDS.indexOf(currentRid as any)
+    if (idx < 0 || idx >= VALID_RANKING_RIDS.length - 1) return null
+    return VALID_RANKING_RIDS[idx + 1]
+  }
+
   function getEndpointName(ep: string) {
     return ep === 'ranking' ? '排行' : '热门'
   }
@@ -70,42 +80,97 @@ export default defineNitroPlugin((nitroApp) => {
     const cached = await useStorage('cache').getItem<CacheEntry<VideosDataMap>>(cacheKey)
     if (!cached?.data) return
 
-    const result = await fetchRankingData({
-      skipRanking: endpoint !== 'ranking',
-      skipPopular: endpoint !== 'popular',
-      existingData: cached.data,
-    })
+    if (endpoint === 'ranking') {
+      // ---- 排行榜：单 rid 模式逐分区重试 ----
+      if (!pendingRankingRid) {
+        // 无待处理 rid，重置并从第一个开始（防御性）
+        pendingRankingRid = VALID_RANKING_RIDS[0]
+      }
 
-    const failed = endpoint === 'ranking' ? (result?.rankingFailed ?? true) : (result?.popularFailed ?? true)
-
-    if (result && !failed) {
-      // 更新缓存
-      await useStorage('cache').setItem(cacheKey, {
-        data: result.data,
-        timestamp: Date.now(),
+      const result = await fetchAllRankings({
+        singleRid: pendingRankingRid,
+        skipPopular: true,
+        existingData: cached.data,
       })
-      state.successes++
-      console.log(
-        `[cache-warmer] ${getEndpointName(endpoint)} 独立重试成功 ` +
-        `(${state.successes}/${RECOVERY_THRESHOLD})，${Object.keys(result.data).length} 条视频`,
-      )
 
-      if (state.successes >= RECOVERY_THRESHOLD) {
-        // 恢复：退出退避，重新加入定时刷新
-        state.inBackoff = false
-        state.failures = 0
-        state.successes = 0
-        console.log(`[cache-warmer] ${getEndpointName(endpoint)} 已恢复，重新加入定时刷新`)
+      if (result && !result.rankingFailed) {
+        // 当前 rid 成功
+        await useStorage('cache').setItem(cacheKey, {
+          data: result.data,
+          timestamp: Date.now(),
+        })
+        state.successes++
+        console.log(
+          `[cache-warmer] 排行 rid=${pendingRankingRid} 独立重试成功 ` +
+          `（${state.successes}/${RECOVERY_THRESHOLD}），${Object.keys(result.data).length} 条视频`,
+        )
+
+        if (state.successes >= RECOVERY_THRESHOLD) {
+          // 恢复：退出退避，清空队列，重新加入定时刷新
+          state.inBackoff = false
+          state.failures = 0
+          state.successes = 0
+          pendingRankingRid = null
+          console.log(`[cache-warmer] 排行已恢复，重新加入定时刷新`)
+        } else {
+          // 前进到下一个 rid
+          const nextRid = getNextRid(pendingRankingRid)
+          if (nextRid) {
+            pendingRankingRid = nextRid
+            state.timer = setTimeout(() => retryEndpoint('ranking'), 60_000)
+            console.log(`[cache-warmer] 排行前进到 rid=${nextRid}，60s 后继续`)
+          } else {
+            // 所有 rid 处理完毕
+            state.inBackoff = false
+            state.failures = 0
+            state.successes = 0
+            pendingRankingRid = null
+            console.log(`[cache-warmer] 排行所有分区处理完毕，恢复定时刷新`)
+          }
+        }
       } else {
-        // 继续以短间隔重试，尽快达到恢复阈值
-        state.timer = setTimeout(() => retryEndpoint(endpoint), 60_000)
+        // 仍失败
+        state.successes = 0
+        state.failures++
+        console.warn(
+          `[cache-warmer] 排行 rid=${pendingRankingRid} 独立重试仍失败，连续 ${state.failures} 次`,
+        )
+        scheduleEndpointRetry('ranking')
       }
     } else {
-      // 仍失败
-      state.successes = 0
-      state.failures++
-      console.warn(`[cache-warmer] ${getEndpointName(endpoint)} 独立重试仍失败，连续 ${state.failures} 次`)
-      scheduleEndpointRetry(endpoint)
+      // ---- 热门：原有逻辑不变 ----
+      const result = await fetchAllRankings({
+        skipRanking: true,
+        existingData: cached.data,
+      })
+
+      const failed = result?.popularFailed ?? true
+
+      if (result && !failed) {
+        await useStorage('cache').setItem(cacheKey, {
+          data: result.data,
+          timestamp: Date.now(),
+        })
+        state.successes++
+        console.log(
+          `[cache-warmer] 热门 独立重试成功 ` +
+          `(${state.successes}/${RECOVERY_THRESHOLD})，${Object.keys(result.data).length} 条视频`,
+        )
+
+        if (state.successes >= RECOVERY_THRESHOLD) {
+          state.inBackoff = false
+          state.failures = 0
+          state.successes = 0
+          console.log(`[cache-warmer] 热门 已恢复，重新加入定时刷新`)
+        } else {
+          state.timer = setTimeout(() => retryEndpoint('popular'), 60_000)
+        }
+      } else {
+        state.successes = 0
+        state.failures++
+        console.warn(`[cache-warmer] 热门 独立重试仍失败，连续 ${state.failures} 次`)
+        scheduleEndpointRetry('popular')
+      }
     }
   }
 
@@ -147,14 +212,14 @@ export default defineNitroPlugin((nitroApp) => {
   }
 
   /**
-   * 完整刷新：拉取未退避端点（排行/热门），跳过的端点保留已有数据
+   * 完整刷新：拉取全部分区排行 + 热门
    */
   async function refresh() {
     try {
       // 读取当前缓存作为 existingData（保留退避中端点的旧数据）
       const cached = await useStorage('cache').getItem<CacheEntry<VideosDataMap>>(cacheKey)
 
-      const result = await fetchRankingData({
+      const result = await fetchAllRankings({
         skipRanking: rankingState.inBackoff,
         skipPopular: popularState.inBackoff,
         existingData: cached?.data,
@@ -169,23 +234,38 @@ export default defineNitroPlugin((nitroApp) => {
           timestamp: Date.now(),
         } satisfies CacheEntry<VideosDataMap>)
 
-        // 检查各端点状态（仅检查我们实际请求的端点）
+        // 检查各端点状态
         let allAttemptedFailed = true
         let anyAttempted = false
 
+        // ---- 排行端点 ----
         if (!rankingState.inBackoff) {
           anyAttempted = true
-          if (result.rankingFailed) {
+          if (result.failedRid) {
+            // 风控触发：进入退避，记录中断位置
             rankingState.inBackoff = true
             rankingState.failures = 1
             rankingState.successes = 0
-            console.warn(`[cache-warmer] 排行被风控，进入独立退避`)
+            pendingRankingRid = result.failedRid
+            console.warn(
+              `[cache-warmer] 排行 rid=${result.failedRid} 触发风控，进入独立退避 ` +
+              `（已保存 ${videoCount} 条视频）`,
+            )
+            scheduleEndpointRetry('ranking')
+          } else if (result.rankingFailed) {
+            // 全部 rid 失败（首个 rid 就返回空）
+            rankingState.inBackoff = true
+            rankingState.failures = 1
+            rankingState.successes = 0
+            pendingRankingRid = VALID_RANKING_RIDS[0]
+            console.warn(`[cache-warmer] 排行全部失败，进入独立退避`)
             scheduleEndpointRetry('ranking')
           } else {
             allAttemptedFailed = false
           }
         }
 
+        // ---- 热门端点（逻辑不变） ----
         if (!popularState.inBackoff) {
           anyAttempted = true
           if (result.popularFailed) {
@@ -207,6 +287,8 @@ export default defineNitroPlugin((nitroApp) => {
           scheduleNextRefresh(delay)
         } else {
           consecutiveFailures = 0
+          // 全量刷新成功，清空分区队列
+          pendingRankingRid = null
           const suffix = [
             rankingState.inBackoff ? '排行退避中' : '',
             popularState.inBackoff ? '热门退避中' : '',

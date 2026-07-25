@@ -26,6 +26,9 @@ export const VALID_RANKING_RIDS = [
 /** 默认 rid（全站排行榜） */
 export const DEFAULT_RID = '0'
 
+/** 全分区组合缓存 Key（合并全部 rid 的结果） */
+export const COMBINED_CACHE_KEY = 'ranking:all'
+
 /** 生成分区排行榜缓存 Key */
 export function rankingCacheKey(rid: string): string {
   return `ranking:${rid}`

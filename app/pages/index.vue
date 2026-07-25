@@ -17,11 +17,22 @@
         @update:purifyPercent="purifyPercent = $event"
       />
 
-      <VideoGrid
-        :videos="filteredVideos"
-        :isLoading="isLoading"
-        :error="error"
-      />
+      <div ref="gridContainerRef">
+        <VideoGrid
+          :videos="displayedVideos"
+          :isLoading="isLoading"
+          :error="error"
+        />
+      </div>
+
+      <!-- 加载更多：滚动到底自动触发 / 点击手动加载 -->
+      <div v-if="hasMore" class="load-more" @click="loadMore">
+        <span v-if="isLoadingMore">加载中...</span>
+        <span v-else>加载更多 ↓</span>
+      </div>
+      <div v-else-if="!isLoading && displayedVideos.length > 0" class="load-more load-more--end">
+        已展示全部 {{ filteredVideos.length }} 条结果
+      </div>
 
       <!-- 页脚 — 对应原 update-time -->
       <div class="update-time">
@@ -94,7 +105,7 @@ if (import.meta.client) {
 
 // 非 lazy：SSR 阶段获取缓存时间戳（只读内存缓存，几乎无延迟）
 const { data: tsData } = await useAsyncData('ranking-timestamp', () =>
-  $fetch('/api/ranking/timestamp', { query: { rid: '0' } }),
+  $fetch('/api/ranking/timestamp'),
 )
 
 // 日期格式选项：固定格式确保服务端/客户端渲染一致，避免 hydration mismatch
@@ -120,7 +131,6 @@ const { data: videosData, pending: isLoading, error: fetchError } = useFetch<Vid
   '/api/ranking',
   {
     key: 'ranking',
-    query: { rid: '0' },
     server: true,
     onResponse({ response }) {
       const ts = response.headers.get('X-Data-Timestamp')
@@ -174,6 +184,96 @@ const filteredVideos = computed(() => {
   return list
 })
 
+// --- 分页加载：只显示 ROWS_PER_LOAD 行，下滑或点击继续加载 ---
+const ROWS_PER_LOAD = 5
+const gridContainerRef = ref<HTMLElement | null>(null)
+const columnsPerRow = ref(5)
+const currentRows = ref(ROWS_PER_LOAD)
+const isLoadingMore = ref(false)
+
+function updateColumns() {
+  const el = gridContainerRef.value
+  if (!el) return
+  if (window.innerWidth <= 768) {
+    columnsPerRow.value = 2
+    return
+  }
+  const minCardWidth = 210
+  const gap = 20
+  const containerWidth = el.clientWidth
+  columnsPerRow.value = Math.max(1, Math.floor((containerWidth + gap) / (minCardWidth + gap)))
+}
+
+const displayedVideos = computed(() => {
+  return filteredVideos.value.slice(0, currentRows.value * columnsPerRow.value)
+})
+
+const hasMore = computed(() => {
+  return displayedVideos.value.length < filteredVideos.value.length
+})
+
+function loadMore() {
+  if (!hasMore.value || isLoadingMore.value) return
+  isLoadingMore.value = true
+  setTimeout(() => {
+    currentRows.value += ROWS_PER_LOAD
+    isLoadingMore.value = false
+  }, 200)
+}
+
+// 筛选条件变化时重置展示行数
+watch([searchTerm, purifyPercent, sortBy], () => {
+  currentRows.value = ROWS_PER_LOAD
+})
+
+// 数据刷新时重置展示行数
+watch(videosData, () => {
+  currentRows.value = ROWS_PER_LOAD
+})
+
+// 滚轮/触摸：到达底部后继续下拉才加载更多
+function onWheel(e: WheelEvent) {
+  if (e.deltaY <= 0) return
+  if (!hasMore.value || isLoadingMore.value) return
+  const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 5
+  if (atBottom) {
+    loadMore()
+  }
+}
+
+let lastTouchY = 0
+
+function onTouchStart(e: TouchEvent) {
+  lastTouchY = e.touches[0].clientY
+}
+
+function onTouchMove(e: TouchEvent) {
+  const currentY = e.touches[0].clientY
+  const deltaY = lastTouchY - currentY  // >0 = 手指上滑（页面向下滚动）
+  lastTouchY = currentY
+  if (deltaY <= 0) return
+  if (!hasMore.value || isLoadingMore.value) return
+  const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 5
+  if (atBottom) {
+    loadMore()
+  }
+}
+
+onMounted(() => {
+  updateColumns()
+  window.addEventListener('resize', updateColumns)
+  window.addEventListener('wheel', onWheel, { passive: true })
+  window.addEventListener('touchstart', onTouchStart, { passive: true })
+  window.addEventListener('touchmove', onTouchMove, { passive: true })
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', updateColumns)
+  window.removeEventListener('wheel', onWheel)
+  window.removeEventListener('touchstart', onTouchStart)
+  window.removeEventListener('touchmove', onTouchMove)
+})
+
 // 客户端：已登录用户动态追加个性化热门视频
 if (import.meta.client) {
   watch(videosData, async () => {
@@ -192,9 +292,10 @@ const { showButton: showBackToTop, scrollToTop } = useScrollToTop(300)
 
 function onBackToTop() {
   scrollToTop(async () => {
+    currentRows.value = ROWS_PER_LOAD
     // 检查数据是否已更新，时间戳相同则跳过刷新
     try {
-      const { timestamp } = await $fetch('/api/ranking/timestamp', { query: { rid: '0' } })
+      const { timestamp } = await $fetch('/api/ranking/timestamp')
       if (timestamp && lastDataTimestamp.value && timestamp === lastDataTimestamp.value) {
         return
       }
@@ -232,5 +333,30 @@ function onBackToTop() {
 
 .github-link a:hover {
   opacity: 1;
+}
+
+/* 加载更多 */
+.load-more {
+  text-align: center;
+  padding: 20px;
+  margin-top: 10px;
+  color: #99a2aa;
+  font-size: 14px;
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.2s;
+}
+
+.load-more:hover {
+  color: var(--b-pink);
+}
+
+.load-more--end {
+  cursor: default;
+  color: #ccc;
+}
+
+.load-more--end:hover {
+  color: #ccc;
 }
 </style>
