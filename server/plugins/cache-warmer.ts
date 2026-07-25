@@ -288,7 +288,12 @@ export default defineNitroPlugin((nitroApp) => {
         } else {
           consecutiveFailures = 0
           // 全量刷新成功，清空分区队列
-          pendingRankingRid = null
+          // 注意：排行正在独立退避时不能清空 pendingRankingRid，
+          // 否则 retryEndpoint 会因 pendingRankingRid 为空而重置为 rid=0，
+          // 导致从错误位置重试（如 rid=3 失败后从 rid=0 重试，或同一 rid 重复）。
+          if (!rankingState.inBackoff) {
+            pendingRankingRid = null
+          }
           const suffix = [
             rankingState.inBackoff ? '排行退避中' : '',
             popularState.inBackoff ? '热门退避中' : '',
