@@ -14,6 +14,7 @@ import {
   dedupByBvid,
   formatCount,
 } from './bilibili'
+import { rankingCacheKey } from './rankingConstants'
 
 /** fetchRankingData 成功时的返回值 */
 export interface RankingFetchResult {
@@ -124,6 +125,7 @@ export async function fetchRankingData(options?: {
   skipRanking?: boolean
   skipPopular?: boolean
   existingData?: VideosDataMap
+  rid?: string
 }): Promise<RankingFetchResult | null> {
   const apiTimeout = 10_000
   let rankingFailed = false
@@ -147,7 +149,7 @@ export async function fetchRankingData(options?: {
   let ranking: RankingVideo[] = []
   if (!options?.skipRanking) {
     ranking = await withTimeout(
-      getBilibiliRanking().catch(() => []),
+      getBilibiliRanking(options?.rid ?? '0').catch(() => []),
       apiTimeout,
       [],
     )
@@ -364,7 +366,7 @@ export async function fetchPersonalizedOnly(cookie: string): Promise<VideosDataM
   const globalCache = await useStorage('cache').getItem<{
     data: VideosDataMap
     timestamp: number
-  }>('ranking:latest')
+  }>(rankingCacheKey('0'))
 
   const existingBvids = new Set(
     globalCache?.data ? Object.keys(globalCache.data) : [],

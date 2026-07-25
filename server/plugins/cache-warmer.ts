@@ -15,6 +15,7 @@
 import { fetchRankingData, retryFailedVideos, retryFailedMetadata } from '../utils/rankingFetcher'
 import { prefetchBiliTicket } from '../utils/bilibili'
 import { MOCK_RANKING } from '../utils/mockData'
+import { rankingCacheKey } from '../utils/rankingConstants'
 import {
   resolveRefreshInterval,
   calculateBackoffDelay,
@@ -23,7 +24,7 @@ import {
 import type { CacheEntry, VideosDataMap } from '../../app/types'
 
 export default defineNitroPlugin((nitroApp) => {
-  const cacheKey = 'ranking:latest'
+  const cacheKey = rankingCacheKey('0')
   const config = useRuntimeConfig()
   const normalInterval = resolveRefreshInterval(
     String(config.cacheWarmer?.refreshIntervalMs ?? ''),

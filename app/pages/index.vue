@@ -94,7 +94,7 @@ if (import.meta.client) {
 
 // 非 lazy：SSR 阶段获取缓存时间戳（只读内存缓存，几乎无延迟）
 const { data: tsData } = await useAsyncData('ranking-timestamp', () =>
-  $fetch('/api/ranking/timestamp'),
+  $fetch('/api/ranking/timestamp', { query: { rid: '0' } }),
 )
 
 // 日期格式选项：固定格式确保服务端/客户端渲染一致，避免 hydration mismatch
@@ -120,6 +120,7 @@ const { data: videosData, pending: isLoading, error: fetchError } = useFetch<Vid
   '/api/ranking',
   {
     key: 'ranking',
+    query: { rid: '0' },
     server: true,
     onResponse({ response }) {
       const ts = response.headers.get('X-Data-Timestamp')
@@ -193,7 +194,7 @@ function onBackToTop() {
   scrollToTop(async () => {
     // 检查数据是否已更新，时间戳相同则跳过刷新
     try {
-      const { timestamp } = await $fetch('/api/ranking/timestamp')
+      const { timestamp } = await $fetch('/api/ranking/timestamp', { query: { rid: '0' } })
       if (timestamp && lastDataTimestamp.value && timestamp === lastDataTimestamp.value) {
         return
       }

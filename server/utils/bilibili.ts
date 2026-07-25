@@ -327,16 +327,18 @@ interface RankingVideo {
 }
 
 /**
- * 获取 B站排行榜视频列表（全站榜 rid=0）
+ * 获取 B站排行榜视频列表
  *
  * API: GET /x/web-interface/ranking/v2
- * 参数: rid=0（全站）, type=all（全部）
+ * 参数: rid（分区 tid，默认 0 全站）, type=all（全部）
+ *
+ * @param rid - 分区 tid，默认 '0'（全站），仅支持主分区
  */
-export async function getBilibiliRanking(): Promise<RankingVideo[]> {
+export async function getBilibiliRanking(rid: string = '0'): Promise<RankingVideo[]> {
   const response = await bilibiliRequest<{ list: RankingVideo[] }>(
     '/x/web-interface/ranking/v2',
     {
-      params: { rid: '0', type: 'all' },
+      params: { rid, type: 'all' },
     },
   )
   const data = response.data as any

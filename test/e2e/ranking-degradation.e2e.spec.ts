@@ -97,6 +97,18 @@ describe('排行榜降级逻辑', async () => {
     expect(['HIT', 'MISS', 'MOCK']).toContain(cacheHeader)
   })
 
+  it('GET /api/ranking?rid=0 响应头正常', async () => {
+    const headers = await getResponseHeaders('/api/ranking?rid=0')
+
+    const cacheHeader = (headers as any)['x-cache']
+    expect(cacheHeader).toBeDefined()
+    expect(['HIT', 'MISS', 'MOCK']).toContain(cacheHeader)
+
+    const tsHeader = (headers as any)['x-data-timestamp']
+    expect(tsHeader).toBeDefined()
+    expect(Number.isFinite(Number(tsHeader))).toBe(true)
+  })
+
   it('ranking/timestamp 端点返回有效时间戳', async () => {
     const data = await $fetch<{ timestamp: number }>('/api/ranking/timestamp')
 

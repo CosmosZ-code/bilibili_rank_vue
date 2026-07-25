@@ -549,4 +549,32 @@ describe('fetchRankingData — 端点跳过与失败追踪', () => {
     expect(result!.rankingFailed).toBe(false)
     expect(result!.popularFailed).toBe(false)
   })
+
+  it('传入 rid 时 getBilibiliRanking 收到对应参数', async () => {
+    mockGetRanking.mockResolvedValue([makeRankingVideo('BV1xx')])
+    mockGetPopular.mockResolvedValue([makeRankingVideo('BV2yy')])
+
+    await fetchRankingData({ rid: '1' })
+
+    expect(mockGetRanking).toHaveBeenCalledWith('1')
+  })
+
+  it('不传 rid 时 getBilibiliRanking 默认传入 0（由函数默认值兜底）', async () => {
+    mockGetRanking.mockResolvedValue([makeRankingVideo('BV1xx')])
+    mockGetPopular.mockResolvedValue([makeRankingVideo('BV2yy')])
+
+    await fetchRankingData()
+
+    // options?.rid 为 undefined，传给 getBilibiliRanking(undefined ?? '0') = ('0')
+    // 但由于 mock，实际调用为 getBilibiliRanking('0')
+    expect(mockGetRanking).toHaveBeenCalledWith('0')
+  })
+
+  it('skipRanking 时即使传了 rid 也不调用 getBilibiliRanking', async () => {
+    mockGetPopular.mockResolvedValue([makeRankingVideo('BV1xx')])
+
+    await fetchRankingData({ skipRanking: true, rid: '3' })
+
+    expect(mockGetRanking).not.toHaveBeenCalled()
+  })
 })

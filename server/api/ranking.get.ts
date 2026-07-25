@@ -10,9 +10,14 @@
 import type { CacheEntry, VideosDataMap } from '../../app/types'
 import { fetchRankingData } from '../utils/rankingFetcher'
 import { MOCK_RANKING } from '../utils/mockData'
+import { rankingCacheKey, isValidRid, DEFAULT_RID } from '../utils/rankingConstants'
 
 export default defineEventHandler(async (event) => {
-  const cacheKey = 'ranking:latest'
+  // 提取并校验分区参数，非法值回退为全站
+  const rawRid = getQuery(event).rid
+  const rid = isValidRid(rawRid) ? rawRid : DEFAULT_RID
+
+  const cacheKey = rankingCacheKey(rid)
   const cacheTTL = 10 * 60 * 1000 // 10 分钟（后台每 4 分钟刷新，留足余量）
 
   // 1. 检查缓存
@@ -25,7 +30,7 @@ export default defineEventHandler(async (event) => {
   }
 
   // 2. 缓存未命中（极少发生），实时拉取
-  const result = await fetchRankingData()
+  const result = await fetchRankingData({ rid })
 
   // B站完全不可用，使用 mock 降级
   if (result === null) {
