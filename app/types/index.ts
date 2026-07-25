@@ -148,3 +148,54 @@ export interface CacheEntry<T> {
   data: T
   timestamp: number
 }
+
+// ============================================================
+// 直播排行相关类型
+// ============================================================
+
+/** 单个直播间信息 */
+export interface LiveRoomInfo {
+  /** 直播标题 */
+  title: string
+  /** 主播名称 */
+  uname: string
+  /** 主播 UID */
+  uid: number
+  /** 直播间 ID */
+  roomid: number
+  /** 原始在线热度 */
+  online: number
+  /** 格式化后的在线热度，如 "12.3万" */
+  online_formatted: string
+  /** 封面图 URL */
+  cover: string
+  /** 主播头像 URL */
+  face: string
+  /** 子分区名，如 "英雄联盟" */
+  area_v2_name: string
+  /** 一级分区名，如 "游戏" */
+  parent_area_name: string
+  /** 一级分区 ID */
+  parent_area_id: number
+  /** 直播间链接 */
+  link: string
+}
+
+/** 直播排行榜分页响应 */
+export interface LiveRankingResponse {
+  items: LiveRoomInfo[]
+  total: number
+  page: number
+  pageSize: number
+  hasMore: boolean
+  timestamp: number
+}
+
+/** 直播一级分区 */
+export interface LiveArea {
+  id: number
+  name: string
+}
+
+/** 视图模式：视频排行 / 直播排行 */
+export type ViewMode = 'videos' | 'live'

@@ -4,7 +4,7 @@
  * 当 B站 API 不可用时返回此数据，确保页面至少有内容展示
  * 数据格式与 data.json 完全兼容
  */
-import type { VideosDataMap } from '../../app/types'
+import type { VideosDataMap, LiveRoomInfo } from '../../app/types'
 
 export const MOCK_RANKING: VideosDataMap = {
   BV1xx411c7mD: {
@@ -102,5 +102,124 @@ export const MOCK_RANKING: VideosDataMap = {
     danmaku_count_num: 72_000,
     play_count: '620万+',
     danmaku_count: '7.2万+',
+  },
+}
+
+// ============================================================
+// 直播 Mock 降级数据
+// ============================================================
+
+export const MOCK_LIVE_ROOMS_MAP: Record<number, LiveRoomInfo> = {
+  1: {
+    title: '【全程高能】世界第一AD的精彩操作集锦',
+    uname: '电竞阿光',
+    uid: 433351,
+    roomid: 5050,
+    online: 125000,
+    online_formatted: '12.5万',
+    cover: 'https://i0.hdslb.com/bfs/live/67db4a6eae398c309244e74f6e85ae8d813bd7c9.jpg',
+    face: 'https://i0.hdslb.com/bfs/face/67db4a6eae398c309244e74f6e85ae8d813bd7c9.jpg',
+    area_v2_name: '英雄联盟',
+    parent_area_name: '游戏',
+    parent_area_id: 2,
+    link: 'https://live.bilibili.com/5050',
+  },
+  2: {
+    title: '唱歌聊天，今天心情超好~',
+    uname: '小甜心吖',
+    uid: 1234567,
+    roomid: 12345,
+    online: 86000,
+    online_formatted: '8.6万',
+    cover: 'https://i0.hdslb.com/bfs/live/67db4a6eae398c309244e74f6e85ae8d813bd7c9.jpg',
+    face: 'https://i0.hdslb.com/bfs/face/67db4a6eae398c309244e74f6e85ae8d813bd7c9.jpg',
+    area_v2_name: '聊天室',
+    parent_area_name: '娱乐',
+    parent_area_id: 1,
+    link: 'https://live.bilibili.com/12345',
+  },
+  3: {
+    title: '原神4.8版本前瞻，一起来抽卡！',
+    uname: '旅行者空空',
+    uid: 2345678,
+    roomid: 23456,
+    online: 54000,
+    online_formatted: '5.4万',
+    cover: 'https://i0.hdslb.com/bfs/live/67db4a6eae398c309244e74f6e85ae8d813bd7c9.jpg',
+    face: 'https://i0.hdslb.com/bfs/face/67db4a6eae398c309244e74f6e85ae8d813bd7c9.jpg',
+    area_v2_name: '原神',
+    parent_area_name: '游戏',
+    parent_area_id: 2,
+    link: 'https://live.bilibili.com/23456',
+  },
+  4: {
+    title: '24小时自习室｜沉浸式学习｜白噪音',
+    uname: 'StudyWithMe',
+    uid: 3456789,
+    roomid: 34567,
+    online: 32000,
+    online_formatted: '3.2万',
+    cover: 'https://i0.hdslb.com/bfs/live/67db4a6eae398c309244e74f6e85ae8d813bd7c9.jpg',
+    face: 'https://i0.hdslb.com/bfs/face/67db4a6eae398c309244e74f6e85ae8d813bd7c9.jpg',
+    area_v2_name: '学习',
+    parent_area_name: '知识',
+    parent_area_id: 3,
+    link: 'https://live.bilibili.com/34567',
+  },
+  5: {
+    title: '【钢琴】班得瑞经典曲目即兴演奏',
+    uname: '钢琴师小林',
+    uid: 4567890,
+    roomid: 45678,
+    online: 21000,
+    online_formatted: '2.1万',
+    cover: 'https://i0.hdslb.com/bfs/live/67db4a6eae398c309244e74f6e85ae8d813bd7c9.jpg',
+    face: 'https://i0.hdslb.com/bfs/face/67db4a6eae398c309244e74f6e85ae8d813bd7c9.jpg',
+    area_v2_name: '钢琴',
+    parent_area_name: '音乐',
+    parent_area_id: 4,
+    link: 'https://live.bilibili.com/45678',
+  },
+  6: {
+    title: '户外徒步｜探索川西秘境',
+    uname: '背包客小张',
+    uid: 5678901,
+    roomid: 56789,
+    online: 15000,
+    online_formatted: '1.5万',
+    cover: 'https://i0.hdslb.com/bfs/live/67db4a6eae398c309244e74f6e85ae8d813bd7c9.jpg',
+    face: 'https://i0.hdslb.com/bfs/face/67db4a6eae398c309244e74f6e85ae8d813bd7c9.jpg',
+    area_v2_name: '户外',
+    parent_area_name: '生活',
+    parent_area_id: 5,
+    link: 'https://live.bilibili.com/56789',
+  },
+  7: {
+    title: '【科普】黑洞是怎么形成的？',
+    uname: '科学探索者',
+    uid: 6789012,
+    roomid: 67890,
+    online: 9800,
+    online_formatted: '9800',
+    cover: 'https://i0.hdslb.com/bfs/live/67db4a6eae398c309244e74f6e85ae8d813bd7c9.jpg',
+    face: 'https://i0.hdslb.com/bfs/face/67db4a6eae398c309244e74f6e85ae8d813bd7c9.jpg',
+    area_v2_name: '科学',
+    parent_area_name: '知识',
+    parent_area_id: 3,
+    link: 'https://live.bilibili.com/67890',
+  },
+  8: {
+    title: '舞蹈练习室｜K-POP 随机舞蹈挑战',
+    uname: '舞者小艺',
+    uid: 7890123,
+    roomid: 78901,
+    online: 7600,
+    online_formatted: '7600',
+    cover: 'https://i0.hdslb.com/bfs/live/67db4a6eae398c309244e74f6e85ae8d813bd7c9.jpg',
+    face: 'https://i0.hdslb.com/bfs/face/67db4a6eae398c309244e74f6e85ae8d813bd7c9.jpg',
+    area_v2_name: '舞蹈',
+    parent_area_name: '舞蹈',
+    parent_area_id: 6,
+    link: 'https://live.bilibili.com/78901',
   },
 }

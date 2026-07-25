@@ -105,6 +105,40 @@ describe('组件关键内容验证', () => {
     expect(content).toContain('percent-range')
   })
 
+  it('RankingControls 包含触屏两阶段点按逻辑', async () => {
+    const fs = await import('node:fs/promises')
+    const content = await fs.readFile(resolve(componentsDir, 'ranking/RankingControls.vue'), 'utf-8')
+    // 引入触屏检测
+    expect(content).toContain('useTouchDevice')
+    // 两阶段点按：首次展开，二次触发
+    expect(content).toContain('isTouch.value && !dropdownOpen.value')
+    // 点击外部关闭
+    expect(content).toContain('onDocumentClick')
+  })
+
+  it('HistoryDropdown 包含触屏点按适配（Teleported 面板）', async () => {
+    const fs = await import('node:fs/promises')
+    const content = await fs.readFile(resolve(componentsDir, 'nav/HistoryDropdown.vue'), 'utf-8')
+    expect(content).toContain('useTouchDevice')
+    expect(content).toContain('@click="onTriggerClick"')
+    expect(content).toContain('historyPanelRef') // Teleported 面板的 ref
+  })
+
+  it('BilibiliLogin 包含触屏切换下拉菜单逻辑', async () => {
+    const fs = await import('node:fs/promises')
+    const content = await fs.readFile(resolve(componentsDir, 'auth/BilibiliLogin.vue'), 'utf-8')
+    expect(content).toContain('useTouchDevice')
+    expect(content).toContain('onUserClick')
+    expect(content).toContain('!isMenuOpen.value')
+  })
+
+  it('NavDropdown 包含触屏点按切换逻辑', async () => {
+    const fs = await import('node:fs/promises')
+    const content = await fs.readFile(resolve(componentsDir, 'nav/NavDropdown.vue'), 'utf-8')
+    expect(content).toContain('useTouchDevice')
+    expect(content).toContain('onTriggerClick')
+  })
+
   it('BackToTop 按钮初始 opacity=0（隐藏）', async () => {
     const fs = await import('node:fs/promises')
     const content = await fs.readFile(resolve(componentsDir, 'common/BackToTop.vue'), 'utf-8')

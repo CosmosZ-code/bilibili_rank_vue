@@ -6,7 +6,14 @@
     </button>
 
     <!-- 已登录 -->
-    <div v-else class="user-info" @mouseenter="onUserEnter" @mouseleave="onUserLeave">
+    <div
+      v-else
+      ref="userMenuWrapperRef"
+      class="user-info"
+      @mouseenter="onUserEnter"
+      @mouseleave="onUserLeave"
+      @click="onUserClick"
+    >
       <img
         v-if="user?.bilibiliFace"
         :src="user.bilibiliFace"
@@ -15,7 +22,7 @@
         referrerpolicy="no-referrer"
       />
       <span class="username">{{ user?.bilibiliUname }}</span>
-      <div v-if="isMenuOpen" class="dropdown-menu" @mouseenter="onMenuEnter" @mouseleave="onUserLeave">
+      <div v-if="isMenuOpen" ref="userDropdownRef" class="dropdown-menu" @mouseenter="onMenuEnter" @mouseleave="onUserLeave">
         <button class="logout-btn" @click="doLogout">退出登录</button>
       </div>
     </div>
@@ -67,11 +74,14 @@
 import QRCode from 'qrcode'
 
 const { user, isLoggedIn, fetchUser, logout } = useAuth()
+const { isTouch } = useTouchDevice()
 
 const showQr = ref(false)
 const qrStatus = ref<'loading' | 'pending' | 'scanned' | 'expired' | 'success' | 'error'>('loading')
 const qrCanvasRef = ref<HTMLCanvasElement | null>(null)
 const isMenuOpen = ref(false)
+const userMenuWrapperRef = ref<HTMLElement | null>(null)
+const userDropdownRef = ref<HTMLElement | null>(null)
 let menuCloseTimer: ReturnType<typeof setTimeout> | null = null
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
@@ -93,6 +103,30 @@ function clearMenuTimer() {
     menuCloseTimer = null
   }
 }
+
+/** 触屏设备：点按用户区域切换下拉菜单 */
+function onUserClick() {
+  if (!isTouch.value) return
+  isMenuOpen.value = !isMenuOpen.value
+}
+
+/** 触屏设备：点击下拉外部时关闭 */
+function onDocumentClick(e: MouseEvent) {
+  if (!isTouch.value || !isMenuOpen.value) return
+  const wrapper = userMenuWrapperRef.value
+  const dropdown = userDropdownRef.value
+  const target = e.target as Node
+  if ((wrapper && wrapper.contains(target)) || (dropdown && dropdown.contains(target))) return
+  isMenuOpen.value = false
+}
+
+onMounted(() => {
+  document.addEventListener('click', onDocumentClick)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', onDocumentClick)
+})
 let qrcodeKey = ''
 let qrCookies = ''
 

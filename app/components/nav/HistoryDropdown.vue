@@ -1,16 +1,24 @@
 <template>
   <div
+    ref="historyWrapperRef"
     class="history-dropdown"
     @mouseenter="onMouseEnter"
     @mouseleave="onMouseLeave"
   >
-    <!-- 触发按钮 -->
-    <a ref="triggerRef" class="history-trigger" href="https://www.bilibili.com/history" target="_blank" @mouseenter="onPanelEnter">历史</a>
+    <!-- 触发按钮：触屏下第一次点按展开面板，第二次点按跳转 -->
+    <a
+      ref="triggerRef"
+      class="history-trigger"
+      href="https://www.bilibili.com/history"
+      target="_blank"
+      @mouseenter="onPanelEnter"
+      @click="onTriggerClick"
+    >历史</a>
 
     <!-- 下拉面板（Teleport 到 body，突破 banner overflow:hidden） -->
     <Teleport to="body">
       <Transition name="fade">
-      <div v-if="isOpen" class="history-panel" :style="panelStyle" @mouseenter="onPanelEnter" @mouseleave="onMouseLeave">
+      <div v-if="isOpen" ref="historyPanelRef" class="history-panel" :style="panelStyle" @mouseenter="onPanelEnter" @mouseleave="onMouseLeave">
       <!-- 未登录 -->
       <div v-if="!isLoggedIn" class="history-placeholder">
         <p>请先登录后查看历史记录</p>
@@ -92,10 +100,13 @@
 <script setup lang="ts">
 const { isLoggedIn } = useAuth()
 const { history, isLoading, error, fetchHistory } = useHistory()
+const { isTouch } = useTouchDevice()
 
 const isOpen = ref(false)
 const hasFetched = ref(false)
 const triggerRef = ref<HTMLElement | null>(null)
+const historyWrapperRef = ref<HTMLElement | null>(null)
+const historyPanelRef = ref<HTMLElement | null>(null)
 const panelStyle = ref<Record<string, string>>({})
 let closeTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -111,6 +122,25 @@ function updatePanelPosition() {
     transform: 'translateX(-50%)',
   }
 }
+
+/** 触屏设备：点击下拉外部时关闭 */
+function onDocumentClick(e: MouseEvent) {
+  if (!isTouch.value || !isOpen.value) return
+  const wrapper = historyWrapperRef.value
+  const panel = historyPanelRef.value
+  const target = e.target as Node
+  // 点击在 wrapper 或 teleported panel 内部时不关闭
+  if ((wrapper && wrapper.contains(target)) || (panel && panel.contains(target))) return
+  isOpen.value = false
+}
+
+onMounted(() => {
+  document.addEventListener('click', onDocumentClick)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', onDocumentClick)
+})
 
 /** 鼠标进入触发按钮 */
 function onMouseEnter() {
@@ -135,6 +165,24 @@ function onMouseLeave() {
   closeTimer = setTimeout(() => {
     isOpen.value = false
   }, 200)
+}
+
+/** 触屏设备：点按触发按钮
+ *  第一次点按：阻止跳转，展开面板
+ *  第二次点按：正常跳转到历史页面 */
+function onTriggerClick(e: MouseEvent) {
+  if (!isTouch.value) return
+  if (!isOpen.value) {
+    e.preventDefault()
+    isOpen.value = true
+    // 首次展开时拉取数据
+    if (!hasFetched.value && isLoggedIn.value && !isLoading.value) {
+      hasFetched.value = true
+      fetchHistory()
+    }
+    nextTick(updatePanelPosition)
+  }
+  // 第二次点按：不阻止默认行为，正常跳转
 }
 
 function clearCloseTimer() {

@@ -40,6 +40,7 @@ describe('index.vue 页面内容验证', () => {
       'BannerContainer',
       'RankingControls',
       'VideoGrid',
+      'LiveGrid',
       'BackToTop',
     ]
 
@@ -67,14 +68,16 @@ describe('index.vue 页面内容验证', () => {
     const content = await fs.readFile(resolve(rootDir, 'app/pages/index.vue'), 'utf-8')
     expect(content).toMatch(/useLazyAsyncData|useFetch/)
     expect(content).toContain('/api/ranking')
+    expect(content).toContain('/api/live-rooms')
   })
 
-  it('双向绑定 sortBy/searchTerm/purifyPercent', async () => {
+  it('双向绑定 viewMode/searchTerm/purifyPercent/areaId', async () => {
     const fs = await import('node:fs/promises')
     const content = await fs.readFile(resolve(rootDir, 'app/pages/index.vue'), 'utf-8')
-    expect(content).toContain('@update:sortBy')
+    expect(content).toContain('@update:viewMode')
     expect(content).toContain('@update:searchTerm')
     expect(content).toContain('@update:purifyPercent')
+    expect(content).toContain('@update:areaId')
   })
 
   it('包含分页相关变量和逻辑', async () => {

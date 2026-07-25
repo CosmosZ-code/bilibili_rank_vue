@@ -1,10 +1,11 @@
 <template>
   <div
+    ref="navDropdownRef"
     class="nav-dropdown"
     @mouseenter="onMouseEnter"
     @mouseleave="onMouseLeave"
   >
-    <button class="nav-dropdown-trigger">
+    <button class="nav-dropdown-trigger" @click="onTriggerClick">
       <slot name="trigger">{{ triggerLabel }}</slot>
     </button>
     <div v-if="isOpen" class="nav-dropdown-menu">
@@ -18,7 +19,10 @@ defineProps<{
   triggerLabel?: string
 }>()
 
+const { isTouch } = useTouchDevice()
+
 const isOpen = ref(false)
+const navDropdownRef = ref<HTMLElement | null>(null)
 let closeTimer: ReturnType<typeof setTimeout> | null = null
 
 function onMouseEnter() {
@@ -34,6 +38,30 @@ function onMouseLeave() {
     isOpen.value = false
   }, 200)
 }
+
+/** 触屏设备：点按切换下拉菜单 */
+function onTriggerClick() {
+  if (!isTouch.value) return
+  isOpen.value = !isOpen.value
+}
+
+/** 触屏设备：点击下拉外部时关闭 */
+function onDocumentClick(e: MouseEvent) {
+  if (!isTouch.value || !isOpen.value) return
+  const el = navDropdownRef.value
+  if (!el) return
+  if (!el.contains(e.target as Node)) {
+    isOpen.value = false
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('click', onDocumentClick)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', onDocumentClick)
+})
 </script>
 
 <style scoped>

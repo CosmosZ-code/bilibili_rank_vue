@@ -797,3 +797,163 @@ export function dedupByBvid<T extends { bvid: string }>(list: T[]): T[] {
     return true
   })
 }
+
+// ============================================================
+// 直播相关
+// ============================================================
+
+const BILIBILI_LIVE_API_BASE = 'https://api.live.bilibili.com'
+
+/** 直播 API 返回的房间条目 */
+export interface LiveRoomRawItem {
+  roomid: number
+  uid: number
+  uname: string
+  title: string
+  online: number
+  cover: string
+  user_cover?: string
+  system_cover?: string
+  face: string
+  link: string
+  /** 子分区名，如 "英雄联盟" */
+  area_name?: string
+  /** 一级分区名，如 "网游" */
+  parent_name?: string
+  /** 一级分区 ID */
+  parent_id?: number
+  /** v2 分区字段（备选） */
+  area_v2_id?: number
+  area_v2_name?: string
+  parent_area_id?: number
+  parent_area_name?: string
+}
+
+/** 直播分区导航项 */
+export interface LiveAreaItem {
+  id: number
+  name: string
+}
+
+/**
+ * 获取直播分区列表（一级分区）
+ *
+ * API: GET /room/v1/area/getList?parent_id=0&platform=web
+ * 公开 GET，不需要 Cookie 和 WBI 签名。
+ * 返回的一级分区字段：id, name, list（子分区数组）
+ *
+ * @returns 一级分区列表 [{ id, name }]
+ */
+export async function getLiveAreas(): Promise<LiveAreaItem[]> {
+  try {
+    const response = await $fetch<{
+      code: number
+      message: string
+      data?: Array<{
+        id: number
+        name: string
+        list?: Array<{ id: string; name: string }>
+      }>
+    }>(`${BILIBILI_LIVE_API_BASE}/room/v1/area/getList`, {
+      params: { parent_id: '0', platform: 'web' },
+      headers: DEFAULT_HEADERS,
+      timeout: 5000,
+    })
+
+    if (response.code === 0 && Array.isArray(response.data)) {
+      const areas: LiveAreaItem[] = []
+      for (const item of response.data) {
+        if (item.id !== undefined && item.id > 0 && item.name) {
+          areas.push({ id: item.id, name: item.name })
+        }
+      }
+      return areas
+    }
+  } catch (err: any) {
+    console.warn('[getLiveAreas] 获取分区列表失败:', err.message || err)
+  }
+
+  return []
+}
+
+/**
+ * 获取直播房间列表（按在线人数排序）
+ *
+ * API: GET /room/v3/area/getRoomList
+ * 完全公开 GET，不需要 WBI 签名和 Cookie。
+ *
+ * @param opts.page - 页码（默认 1）
+ * @param opts.pageSize - 每页条数（默认 30）
+ * @param opts.parentAreaId - 一级分区 ID（可选，0 或 undefined 为全站）
+ * @returns 直播房间条目数组
+ */
+export async function getLiveRoomList(options?: {
+  page?: number
+  pageSize?: number
+  parentAreaId?: number
+}): Promise<LiveRoomRawItem[]> {
+  const params: Record<string, string | number> = {
+    platform: 'web',
+    page: options?.page ?? 1,
+    page_size: options?.pageSize ?? 30,
+    sort_type: 'online',
+  }
+
+  // parent_area_id=0 等同于不传（全站），传 undefined 避免无效参数
+  if (options?.parentAreaId && options.parentAreaId > 0) {
+    params.parent_area_id = options.parentAreaId
+  }
+
+  try {
+    const response = await $fetch<{
+      code: number
+      message: string
+      data?: {
+        list?: LiveRoomRawItem[]
+        count?: number
+      }
+    }>(`${BILIBILI_LIVE_API_BASE}/room/v3/area/getRoomList`, {
+      params,
+      headers: DEFAULT_HEADERS,
+      timeout: 8000,
+    })
+
+    if (response.code === 0 && response.data?.list) {
+      // 补充 link 字段（部分条目可能没有 link，或者 link 是相对路径 /5050）
+      return response.data.list.map((room) => {
+        let link = room.link || ''
+        if (link && !link.startsWith('http')) {
+          // 处理相对路径或协议相关路径
+          link = link.startsWith('//')
+            ? `https:${link}`
+            : `https://live.bilibili.com${link.startsWith('/') ? link : `/${room.roomid}`}`
+        } else if (!link) {
+          link = `https://live.bilibili.com/${room.roomid}`
+        }
+        return {
+          ...room,
+          link,
+          cover: ensureHttps(room.cover || room.user_cover || room.system_cover || ''),
+        }
+      })
+    }
+
+    console.warn('[getLiveRoomList] API 返回异常:', response.code, response.message)
+  } catch (err: any) {
+    console.warn('[getLiveRoomList] 请求失败:', err.message || err)
+  }
+
+  return []
+}
+
+/**
+ * 按 roomid 对直播房间列表去重
+ */
+export function dedupByRoomid<T extends { roomid: number }>(list: T[]): T[] {
+  const seen = new Set<number>()
+  return list.filter((item) => {
+    if (seen.has(item.roomid)) return false
+    seen.add(item.roomid)
+    return true
+  })
+}

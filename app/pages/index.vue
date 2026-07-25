@@ -9,32 +9,56 @@
 
     <div class="container">
       <RankingControls
-        :sortBy="sortBy"
-        :searchTerm="searchTerm"
+        :viewMode="viewMode"
+        :searchTerm="activeSearchTerm"
         :purifyPercent="purifyPercent"
-        @update:sortBy="sortBy = $event"
-        @update:searchTerm="searchTerm = $event"
+        :areaId="areaId"
+        :areas="areas"
+        @update:viewMode="onViewModeChange"
+        @update:searchTerm="onSearchTermChange"
         @update:purifyPercent="purifyPercent = $event"
+        @update:areaId="areaId = $event"
       />
 
       <div ref="gridContainerRef">
-        <VideoGrid
-          :videos="displayedVideos"
-          :isLoading="isLoading"
-          :error="error"
-        />
+        <!-- 视频模式 -->
+        <template v-if="viewMode === 'videos'">
+          <VideoGrid
+            :videos="displayedVideos"
+            :isLoading="isLoading"
+            :error="error"
+          />
+
+          <!-- 加载更多 -->
+          <div v-if="hasMoreFromServer" class="load-more" @click="loadMore">
+            <span v-if="isLoadingMore">加载中...</span>
+            <span v-else>加载更多 ↓</span>
+          </div>
+          <div v-else-if="!isLoading && displayedVideos.length > 0" class="load-more load-more--end">
+            已展示全部 {{ displayedVideos.length }} 条结果
+          </div>
+        </template>
+
+        <!-- 直播模式 -->
+        <template v-else>
+          <LiveGrid
+            :rooms="displayedLiveRooms"
+            :isLoading="liveIsLoading"
+            :error="liveError"
+          />
+
+          <!-- 加载更多 -->
+          <div v-if="liveHasMoreFromServer" class="load-more" @click="loadMoreLive">
+            <span v-if="liveIsLoadingMore">加载中...</span>
+            <span v-else>加载更多 ↓</span>
+          </div>
+          <div v-else-if="!liveIsLoading && displayedLiveRooms.length > 0" class="load-more load-more--end">
+            已展示全部 {{ displayedLiveRooms.length }} 条结果
+          </div>
+        </template>
       </div>
 
-      <!-- 加载更多：滚动到底自动触发 / 点击手动加载 -->
-      <div v-if="hasMoreFromServer" class="load-more" @click="loadMore">
-        <span v-if="isLoadingMore">加载中...</span>
-        <span v-else>加载更多 ↓</span>
-      </div>
-      <div v-else-if="!isLoading && displayedVideos.length > 0" class="load-more load-more--end">
-        已展示全部 {{ displayedVideos.length }} 条结果
-      </div>
-
-      <!-- 页脚 — 对应原 update-time -->
+      <!-- 页脚 -->
       <div class="update-time">
         数据最后<span>更新时间: {{ updateTime }}</span>
         <p class="subtitle">此页面基于以下开源项目：</p>
@@ -54,7 +78,7 @@
 </template>
 
 <script setup lang="ts">
-import type { RankingResponse, VideoWithBvid } from '../types'
+import type { RankingResponse, VideoWithBvid, LiveRankingResponse, LiveArea, ViewMode } from '../types'
 
 useHead({
   title: '当前在线 - 嗶哩嗶哩 - ( ゜- ゜)つロ 乾杯~ - bilibili.tv',
@@ -66,11 +90,50 @@ useHead({
   ],
 })
 
+// ============================================================
+// 视图模式：从 URL query 读取
+// ============================================================
+const route = useRoute()
+const router = useRouter()
+const viewMode = ref<ViewMode>('videos')
+
+// 初始化 viewMode
+if (route.query.view === 'live') {
+  viewMode.value = 'live'
+}
+
+function onViewModeChange(newMode: ViewMode) {
+  viewMode.value = newMode
+  router.push({ query: { ...route.query, view: newMode === 'live' ? 'live' : undefined } })
+}
+
+// ============================================================
+// 视频排行的搜索词 = 直播排行的搜索词共用一个？
+// 为了隔离，使用各自独立的搜索词
+// ============================================================
+const videoSearchTerm = ref('')
+const liveSearchTerm = ref('')
+
+// RankingControls 绑定的搜索词：根据当前 viewMode 路由
+const activeSearchTerm = computed(() =>
+  viewMode.value === 'videos' ? videoSearchTerm.value : liveSearchTerm.value,
+)
+
+function onSearchTermChange(val: string) {
+  if (viewMode.value === 'videos') {
+    videoSearchTerm.value = val
+  } else {
+    liveSearchTerm.value = val
+  }
+}
+
+// ============================================================
+// 视频模式：原有状态
+// ============================================================
 const sortBy = ref<'count'>('count')
-const searchTerm = ref('')
 const purifyPercent = useCookie<number>('purify_percent', { default: () => 10 })
 
-// 登录后从 DB 同步偏好（DB > Cookie），首次登录把 Cookie 值写 DB
+// 登录后从 DB 同步偏好
 if (import.meta.client) {
   const { user: authUser } = useAuth()
   watch(authUser, async (u) => {
@@ -123,40 +186,36 @@ const updateTime = ref(
 )
 const lastDataTimestamp = ref(tsData.value?.timestamp ?? 0)
 
-// --- 分页加载 ---
+// --- 视频分页 ---
 const PAGE_SIZE = 30
 const currentPage = ref(1)
 const isLoadingMore = ref(false)
-const extraItems = ref<VideoWithBvid[]>([])  // 第 2 页及以后的数据
+const extraItems = ref<VideoWithBvid[]>([])
 
-// 构建查询参数
 function buildQuery(page: number) {
   return {
     page,
     pageSize: PAGE_SIZE,
     sortBy: sortBy.value,
-    search: searchTerm.value || undefined,
+    search: videoSearchTerm.value || undefined,
     purifyPercent: purifyPercent.value,
   }
 }
 
-// 首页数据（SSR + 响应式 refetch）
+// 视频首页数据（SSR + 响应式 refetch，仅在 videos 模式活跃时 watch）
 const { data: page1Data, pending: isLoading, error: fetchError } = useLazyAsyncData(
   'ranking',
   () => $fetch<RankingResponse>('/api/ranking', { query: buildQuery(1) }),
-  { watch: [searchTerm, purifyPercent, sortBy] },
+  { watch: [videoSearchTerm, purifyPercent, sortBy] },
 )
 
-// 合并首页 + 额外加载的页面 → 直接派生，无需 watch 拷贝（避免 SSR hydration mismatch）
 const displayedVideos = computed(() => {
   const page1 = page1Data.value?.items || []
   return [...page1, ...extraItems.value]
 })
 
-// 是否还有更多数据
 const hasMoreFromServer = ref(true)
 
-// 首页数据变化时重置（筛选/排序变化触发 refetch）
 watch(page1Data, (data) => {
   if (!data) return
   extraItems.value = []
@@ -168,7 +227,6 @@ watch(page1Data, (data) => {
   }
 })
 
-// 加载更多（客户端 only）
 async function loadMore() {
   if (!hasMoreFromServer.value || isLoadingMore.value) return
   isLoadingMore.value = true
@@ -179,7 +237,7 @@ async function loadMore() {
     hasMoreFromServer.value = res.hasMore
     currentPage.value = nextPage
   } catch {
-    // 加载失败静默，用户可以重试
+    // 加载失败静默
   } finally {
     isLoadingMore.value = false
   }
@@ -190,13 +248,120 @@ const error = computed(() => {
   return null
 })
 
-// --- 滚轮/触摸：到达底部后继续下拉才加载更多 ---
+// ============================================================
+// 直播模式：新增状态
+// ============================================================
+const areaId = ref(0)
+const liveCurrentPage = ref(1)
+const liveIsLoadingMore = ref(false)
+const liveExtraItems = ref<(import('../types').LiveRoomInfo)[]>([])
+
+const areas = ref<LiveArea[]>([])
+
+// 加载分区列表（页面初始化即加载，保证 dropdown hover 时已有数据）
+let areasLoaded = false
+async function loadAreas() {
+  if (areasLoaded) return
+  try {
+    const res = await $fetch<{ areas: LiveArea[] }>('/api/live-areas')
+    if (res.areas?.length) {
+      areas.value = res.areas
+      areasLoaded = true
+    }
+  } catch { /* 静默 */ }
+}
+
+// 客户端 & SSR 后都尝试加载（SSR 阶段 $fetch 服务端地址）
+if (import.meta.client) {
+  loadAreas()
+}
+
+function buildLiveQuery(page: number) {
+  return {
+    page,
+    pageSize: PAGE_SIZE,
+    search: liveSearchTerm.value || undefined,
+    areaId: areaId.value > 0 ? areaId.value : undefined,
+  }
+}
+
+// 直播首页数据（仅在 live 模式活跃时 watch）
+const { data: livePage1Data, pending: liveIsLoading, error: liveFetchError } = useLazyAsyncData(
+  'live-ranking',
+  () => $fetch<LiveRankingResponse>('/api/live-rooms', { query: buildLiveQuery(1) }),
+  { watch: [liveSearchTerm, areaId] },
+)
+
+const displayedLiveRooms = computed(() => {
+  const page1 = livePage1Data.value?.items || []
+  return [...page1, ...liveExtraItems.value]
+})
+
+const liveHasMoreFromServer = ref(true)
+
+watch(livePage1Data, (data) => {
+  if (!data) return
+  liveExtraItems.value = []
+  liveCurrentPage.value = 1
+  liveHasMoreFromServer.value = data.hasMore
+  if (data.timestamp) {
+    updateTime.value = formatDate(data.timestamp)
+  }
+})
+
+async function loadMoreLive() {
+  if (!liveHasMoreFromServer.value || liveIsLoadingMore.value) return
+  liveIsLoadingMore.value = true
+  const nextPage = liveCurrentPage.value + 1
+  try {
+    const res = await $fetch<LiveRankingResponse>('/api/live-rooms', { query: buildLiveQuery(nextPage) })
+    liveExtraItems.value.push(...res.items)
+    liveHasMoreFromServer.value = res.hasMore
+    liveCurrentPage.value = nextPage
+  } catch {
+    // 加载失败静默
+  } finally {
+    liveIsLoadingMore.value = false
+  }
+}
+
+const liveError = computed(() => {
+  if (liveFetchError.value) return (liveFetchError.value as any)?.message || '加载失败'
+  return null
+})
+
+// 切换视图时重置分页状态
+watch(viewMode, async (mode) => {
+  if (mode === 'live') {
+    // 重置直播分页
+    liveExtraItems.value = []
+    liveCurrentPage.value = 1
+    liveHasMoreFromServer.value = true
+  } else {
+    // 重置视频分页
+    extraItems.value = []
+    currentPage.value = 1
+    hasMoreFromServer.value = page1Data.value?.hasMore ?? true
+  }
+})
+
+// ============================================================
+// 滚轮/触摸：到达底部后继续下拉才加载更多
+// ============================================================
 function onWheel(e: WheelEvent) {
   if (e.deltaY <= 0) return
-  if (!hasMoreFromServer.value || isLoadingMore.value) return
+  if (viewMode.value === 'videos') {
+    if (!hasMoreFromServer.value || isLoadingMore.value) return
+  } else {
+    if (!liveHasMoreFromServer.value || liveIsLoadingMore.value) return
+  }
   const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 5
   if (atBottom) {
-    loadMore()
+    if (viewMode.value === 'videos') {
+      loadMore()
+    } else {
+      loadMoreLive()
+    }
   }
 }
 
@@ -208,13 +373,21 @@ function onTouchStart(e: TouchEvent) {
 
 function onTouchMove(e: TouchEvent) {
   const currentY = e.touches[0].clientY
-  const deltaY = lastTouchY - currentY  // >0 = 手指上滑（页面向下滚动）
+  const deltaY = lastTouchY - currentY
   lastTouchY = currentY
   if (deltaY <= 0) return
-  if (!hasMoreFromServer.value || isLoadingMore.value) return
+  if (viewMode.value === 'videos') {
+    if (!hasMoreFromServer.value || isLoadingMore.value) return
+  } else {
+    if (!liveHasMoreFromServer.value || liveIsLoadingMore.value) return
+  }
   const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 5
   if (atBottom) {
-    loadMore()
+    if (viewMode.value === 'videos') {
+      loadMore()
+    } else {
+      loadMoreLive()
+    }
   }
 }
 
@@ -234,18 +407,25 @@ const { showButton: showBackToTop, scrollToTop } = useScrollToTop(300)
 
 function onBackToTop() {
   scrollToTop(async () => {
-    // 回缩：清除额外加载的页面，回到首页
-    extraItems.value = []
-    currentPage.value = 1
-    hasMoreFromServer.value = page1Data.value?.hasMore ?? true
-    // 数据已过期则刷新
-    try {
-      const { timestamp } = await $fetch('/api/ranking/timestamp')
-      if (timestamp && lastDataTimestamp.value && timestamp === lastDataTimestamp.value) {
-        return
-      }
-    } catch { /* 失败则照常刷新 */ }
-    refreshNuxtData('ranking')
+    if (viewMode.value === 'videos') {
+      extraItems.value = []
+      currentPage.value = 1
+      hasMoreFromServer.value = page1Data.value?.hasMore ?? true
+      try {
+        const { timestamp } = await $fetch('/api/ranking/timestamp')
+        if (timestamp && lastDataTimestamp.value && timestamp === lastDataTimestamp.value) return
+      } catch { /* 失败则照常刷新 */ }
+      refreshNuxtData('ranking')
+    } else {
+      liveExtraItems.value = []
+      liveCurrentPage.value = 1
+      liveHasMoreFromServer.value = livePage1Data.value?.hasMore ?? true
+      try {
+        const { timestamp } = await $fetch('/api/live-rooms/timestamp')
+        if (timestamp && timestamp === livePage1Data.value?.timestamp) return
+      } catch { /* 失败则照常刷新 */ }
+      refreshNuxtData('live-ranking')
+    }
   })
 }
 </script>
