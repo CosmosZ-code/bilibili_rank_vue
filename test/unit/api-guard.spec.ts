@@ -8,6 +8,7 @@ import {
   checkOrigin,
   parseAllowedOrigins,
   extractOriginFromReferer,
+  isLocalOrigin,
 } from '../../server/utils/apiGuard'
 
 const ALLOWED_ORIGINS = ['https://bilibili.zhyv.net']
@@ -221,5 +222,34 @@ describe('extractOriginFromReferer', () => {
 
   it('空字符串返回 null', () => {
     expect(extractOriginFromReferer('')).toBeNull()
+  })
+})
+
+// ════════════════════════════════════════════════════════════════
+// isLocalOrigin
+// ════════════════════════════════════════════════════════════════
+
+describe('isLocalOrigin', () => {
+  it('localhost 返回 true', () => {
+    expect(isLocalOrigin('http://localhost:3000')).toBe(true)
+  })
+
+  it('127.0.0.1 返回 true', () => {
+    expect(isLocalOrigin('http://127.0.0.1:3000')).toBe(true)
+  })
+
+  it('192.168.x.x 返回 true', () => {
+    expect(isLocalOrigin('http://192.168.1.100:3000')).toBe(true)
+    expect(isLocalOrigin('http://192.168.0.1:3000')).toBe(true)
+    expect(isLocalOrigin('http://192.168.255.255:3000')).toBe(true)
+  })
+
+  it('公网 IP 返回 false', () => {
+    expect(isLocalOrigin('https://bilibili.zhyv.net')).toBe(false)
+    expect(isLocalOrigin('https://evil.com')).toBe(false)
+  })
+
+  it('非法 origin 返回 false', () => {
+    expect(isLocalOrigin('not-a-url')).toBe(false)
   })
 })

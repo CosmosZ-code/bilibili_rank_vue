@@ -26,12 +26,12 @@
       </div>
 
       <!-- 加载更多：滚动到底自动触发 / 点击手动加载 -->
-      <div v-if="hasMore" class="load-more" @click="loadMore">
+      <div v-if="hasMoreFromServer" class="load-more" @click="loadMore">
         <span v-if="isLoadingMore">加载中...</span>
         <span v-else>加载更多 ↓</span>
       </div>
       <div v-else-if="!isLoading && displayedVideos.length > 0" class="load-more load-more--end">
-        已展示全部 {{ filteredVideos.length }} 条结果
+        已展示全部 {{ displayedVideos.length }} 条结果
       </div>
 
       <!-- 页脚 — 对应原 update-time -->
@@ -54,7 +54,7 @@
 </template>
 
 <script setup lang="ts">
-import type { VideosDataMap } from '../types'
+import type { RankingResponse, VideoWithBvid } from '../types'
 
 useHead({
   title: '当前在线 - 嗶哩嗶哩 - ( ゜- ゜)つロ 乾杯~ - bilibili.tv',
@@ -62,6 +62,7 @@ useHead({
     { charset: 'UTF-8' },
     { name: 'viewport', content: 'width=device-width, initial-scale=1.0' },
     { name: 'description', content: 'B站实时在线观看人数排行榜' },
+    { name: 'referrer', content: 'no-referrer' },
   ],
 })
 
@@ -77,19 +78,16 @@ if (import.meta.client) {
     try {
       const prefs = await $fetch<{ purifyPercent: number | null }>('/api/user/preferences')
       if (prefs.purifyPercent !== null) {
-        // DB 有记录 → 覆盖 Cookie
         purifyPercent.value = prefs.purifyPercent
       } else {
-        // DB 无记录 → 把当前 Cookie 值写入 DB
         $fetch('/api/user/preferences', {
           method: 'PUT',
           body: { purifyPercent: purifyPercent.value },
         }).catch(() => {})
       }
-    } catch { /* 请求失败静默，保持 Cookie 值 */ }
+    } catch { /* 请求失败静默 */ }
   }, { immediate: true })
 
-  // 调整滑块 → 1s debounce 写 DB
   let saveTimer: ReturnType<typeof setTimeout>
   watch(purifyPercent, (val) => {
     if (!authUser.value?.bilibiliUid) return
@@ -103,12 +101,11 @@ if (import.meta.client) {
   })
 }
 
-// 非 lazy：SSR 阶段获取缓存时间戳（只读内存缓存，几乎无延迟）
+// 非 lazy：SSR 阶段获取缓存时间戳
 const { data: tsData } = await useAsyncData('ranking-timestamp', () =>
   $fetch('/api/ranking/timestamp'),
 )
 
-// 日期格式选项：固定格式确保服务端/客户端渲染一致，避免 hydration mismatch
 const DATE_LOCALE_OPTIONS: Intl.DateTimeFormatOptions = {
   year: 'numeric', month: '2-digit', day: '2-digit',
   hour: '2-digit', minute: '2-digit', second: '2-digit',
@@ -126,115 +123,77 @@ const updateTime = ref(
 )
 const lastDataTimestamp = ref(tsData.value?.timestamp ?? 0)
 
-// lazy：主数据不阻塞页面渲染
-const { data: videosData, pending: isLoading, error: fetchError } = useFetch<VideosDataMap>(
-  '/api/ranking',
-  {
-    key: 'ranking',
-    server: true,
-    onResponse({ response }) {
-      const ts = response.headers.get('X-Data-Timestamp')
-      if (ts) {
-        lastDataTimestamp.value = Number(ts)
-        updateTime.value = formatDate(Number(ts))
-      }
-    },
-  },
+// --- 分页加载 ---
+const PAGE_SIZE = 30
+const currentPage = ref(1)
+const isLoadingMore = ref(false)
+const extraItems = ref<VideoWithBvid[]>([])  // 第 2 页及以后的数据
+
+// 构建查询参数
+function buildQuery(page: number) {
+  return {
+    page,
+    pageSize: PAGE_SIZE,
+    sortBy: sortBy.value,
+    search: searchTerm.value || undefined,
+    purifyPercent: purifyPercent.value,
+  }
+}
+
+// 首页数据（SSR + 响应式 refetch）
+const { data: page1Data, pending: isLoading, error: fetchError } = useLazyAsyncData(
+  'ranking',
+  () => $fetch<RankingResponse>('/api/ranking', { query: buildQuery(1) }),
+  { watch: [searchTerm, purifyPercent, sortBy] },
 )
+
+// 合并首页 + 额外加载的页面 → 直接派生，无需 watch 拷贝（避免 SSR hydration mismatch）
+const displayedVideos = computed(() => {
+  const page1 = page1Data.value?.items || []
+  return [...page1, ...extraItems.value]
+})
+
+// 是否还有更多数据
+const hasMoreFromServer = ref(true)
+
+// 首页数据变化时重置（筛选/排序变化触发 refetch）
+watch(page1Data, (data) => {
+  if (!data) return
+  extraItems.value = []
+  currentPage.value = 1
+  hasMoreFromServer.value = data.hasMore
+  if (data.timestamp) {
+    lastDataTimestamp.value = data.timestamp
+    updateTime.value = formatDate(data.timestamp)
+  }
+})
+
+// 加载更多（客户端 only）
+async function loadMore() {
+  if (!hasMoreFromServer.value || isLoadingMore.value) return
+  isLoadingMore.value = true
+  const nextPage = currentPage.value + 1
+  try {
+    const res = await $fetch<RankingResponse>('/api/ranking', { query: buildQuery(nextPage) })
+    extraItems.value.push(...res.items)
+    hasMoreFromServer.value = res.hasMore
+    currentPage.value = nextPage
+  } catch {
+    // 加载失败静默，用户可以重试
+  } finally {
+    isLoadingMore.value = false
+  }
+}
 
 const error = computed(() => {
   if (fetchError.value) return (fetchError.value as any)?.message || '加载失败'
   return null
 })
 
-const filteredVideos = computed(() => {
-  const raw = videosData.value
-  if (!raw || typeof raw !== 'object') return []
-
-  let list = Object.entries(raw).map(([bvid, info]) => ({
-    bvid,
-    title: info.title || '',
-    owner: info.owner || '',
-    mid: info.mid || '',
-    pic: info.pic || '',
-    online_count: info.online_count || '0',
-    count_num: info.count_num || 0,
-    play_count_num: info.play_count_num || 0,
-    danmaku_count_num: info.danmaku_count_num || 0,
-    play_count: info.play_count || '0',
-    danmaku_count: info.danmaku_count || '0',
-  }))
-
-  if (sortBy.value === 'count') {
-    list.sort((a, b) => b.count_num - a.count_num)
-  }
-
-  const term = searchTerm.value.trim().toLowerCase()
-  if (term) {
-    list = list.filter((v) => v.title.toLowerCase().includes(term) || v.owner.toLowerCase().includes(term))
-  }
-
-  if (purifyPercent.value > 0) {
-    list = list.filter((v) => {
-      if (v.danmaku_count_num > 10000) return true
-      return v.danmaku_count_num * 66 >= (v.play_count_num * purifyPercent.value) / 100
-    })
-  }
-
-  return list
-})
-
-// --- 分页加载：只显示 ROWS_PER_LOAD 行，下滑或点击继续加载 ---
-const ROWS_PER_LOAD = 5
-const gridContainerRef = ref<HTMLElement | null>(null)
-const columnsPerRow = ref(5)
-const currentRows = ref(ROWS_PER_LOAD)
-const isLoadingMore = ref(false)
-
-function updateColumns() {
-  const el = gridContainerRef.value
-  if (!el) return
-  if (window.innerWidth <= 768) {
-    columnsPerRow.value = 2
-    return
-  }
-  const minCardWidth = 210
-  const gap = 20
-  const containerWidth = el.clientWidth
-  columnsPerRow.value = Math.max(1, Math.floor((containerWidth + gap) / (minCardWidth + gap)))
-}
-
-const displayedVideos = computed(() => {
-  return filteredVideos.value.slice(0, currentRows.value * columnsPerRow.value)
-})
-
-const hasMore = computed(() => {
-  return displayedVideos.value.length < filteredVideos.value.length
-})
-
-function loadMore() {
-  if (!hasMore.value || isLoadingMore.value) return
-  isLoadingMore.value = true
-  setTimeout(() => {
-    currentRows.value += ROWS_PER_LOAD
-    isLoadingMore.value = false
-  }, 200)
-}
-
-// 筛选条件变化时重置展示行数
-watch([searchTerm, purifyPercent, sortBy], () => {
-  currentRows.value = ROWS_PER_LOAD
-})
-
-// 数据刷新时重置展示行数
-watch(videosData, () => {
-  currentRows.value = ROWS_PER_LOAD
-})
-
-// 滚轮/触摸：到达底部后继续下拉才加载更多
+// --- 滚轮/触摸：到达底部后继续下拉才加载更多 ---
 function onWheel(e: WheelEvent) {
   if (e.deltaY <= 0) return
-  if (!hasMore.value || isLoadingMore.value) return
+  if (!hasMoreFromServer.value || isLoadingMore.value) return
   const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 5
   if (atBottom) {
     loadMore()
@@ -252,7 +211,7 @@ function onTouchMove(e: TouchEvent) {
   const deltaY = lastTouchY - currentY  // >0 = 手指上滑（页面向下滚动）
   lastTouchY = currentY
   if (deltaY <= 0) return
-  if (!hasMore.value || isLoadingMore.value) return
+  if (!hasMoreFromServer.value || isLoadingMore.value) return
   const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 5
   if (atBottom) {
     loadMore()
@@ -260,40 +219,26 @@ function onTouchMove(e: TouchEvent) {
 }
 
 onMounted(() => {
-  updateColumns()
-  window.addEventListener('resize', updateColumns)
   window.addEventListener('wheel', onWheel, { passive: true })
   window.addEventListener('touchstart', onTouchStart, { passive: true })
   window.addEventListener('touchmove', onTouchMove, { passive: true })
 })
 
 onUnmounted(() => {
-  window.removeEventListener('resize', updateColumns)
   window.removeEventListener('wheel', onWheel)
   window.removeEventListener('touchstart', onTouchStart)
   window.removeEventListener('touchmove', onTouchMove)
 })
 
-// 客户端：已登录用户动态追加个性化热门视频
-if (import.meta.client) {
-  watch(videosData, async () => {
-    try {
-      const extra = await $fetch<Record<string, any>>('/api/ranking/personalized')
-      if (extra && Object.keys(extra).length > 0 && videosData.value) {
-        Object.assign(videosData.value, extra)
-      }
-    } catch {
-      // 静默失败，全局数据已展示
-    }
-  }, { immediate: true })
-}
-
 const { showButton: showBackToTop, scrollToTop } = useScrollToTop(300)
 
 function onBackToTop() {
   scrollToTop(async () => {
-    currentRows.value = ROWS_PER_LOAD
-    // 检查数据是否已更新，时间戳相同则跳过刷新
+    // 回缩：清除额外加载的页面，回到首页
+    extraItems.value = []
+    currentPage.value = 1
+    hasMoreFromServer.value = page1Data.value?.hasMore ?? true
+    // 数据已过期则刷新
     try {
       const { timestamp } = await $fetch('/api/ranking/timestamp')
       if (timestamp && lastDataTimestamp.value && timestamp === lastDataTimestamp.value) {

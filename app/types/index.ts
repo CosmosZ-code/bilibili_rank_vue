@@ -128,6 +128,21 @@ export interface BilibiliResponse<T> {
   data: T
 }
 
+/** 带 bvid 的视频条目（从 VideosDataMap 展开） */
+export interface VideoWithBvid extends VideoInfo {
+  bvid: string
+}
+
+/** 排行榜分页响应 */
+export interface RankingResponse {
+  items: VideoWithBvid[]
+  total: number
+  page: number
+  pageSize: number
+  hasMore: boolean
+  timestamp: number
+}
+
 /** 缓存条目 */
 export interface CacheEntry<T> {
   data: T

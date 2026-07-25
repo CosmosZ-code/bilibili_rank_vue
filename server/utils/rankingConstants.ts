@@ -38,3 +38,9 @@ export function rankingCacheKey(rid: string): string {
 export function isValidRid(rid: unknown): rid is string {
   return typeof rid === 'string' && (VALID_RANKING_RIDS as readonly string[]).includes(rid)
 }
+
+/** 默认每页条数 */
+export const DEFAULT_PAGE_SIZE = 30
+
+/** 默认排序方式 */
+export const DEFAULT_SORT_BY = 'count'

@@ -4,7 +4,7 @@
  * 从 B站 API 获取排行榜 + 热门视频，合并去重后批量获取视频详情。
  * 供 API 路由（ranking.get.ts）和后台定时任务（cache-warmer）共同使用。
  */
-import type { VideosDataMap } from '../../app/types'
+import type { VideosDataMap, VideoWithBvid } from '../../app/types'
 import type { RankingVideo } from './bilibili'
 import {
   getBilibiliRanking,
@@ -16,6 +16,57 @@ import {
   formatCount,
 } from './bilibili'
 import { COMBINED_CACHE_KEY, VALID_RANKING_RIDS } from './rankingConstants'
+
+/**
+ * 对 VideosDataMap 进行排序、搜索过滤、净化过滤，返回 VideoWithBvid[]
+ *
+ * 用于 /api/ranking 分页接口的服务端数据处理。
+ * 排序：count_num 降序，相同则 bvid 升序（保证跨页稳定）。
+ *
+ * @param dataMap - 从缓存中读取的原始 VideosDataMap
+ * @param opts.sortBy - 排序方式（默认 'count'）
+ * @param opts.search - 搜索关键词（大小写不敏感，匹配 title / owner）
+ * @param opts.purifyPercent - 净化阈值（0 = 不过滤）
+ */
+export function sortAndFilterRanking(
+  dataMap: VideosDataMap,
+  opts: { sortBy?: string; search?: string; purifyPercent?: number } = {},
+): VideoWithBvid[] {
+  let list: VideoWithBvid[] = Object.entries(dataMap).map(([bvid, info]) => ({
+    bvid,
+    ...info,
+  }))
+
+  // 排序
+  if (opts.sortBy !== 'count') {
+    // 未来可扩展其他排序方式
+  }
+  list.sort((a, b) => {
+    const diff = b.count_num - a.count_num
+    if (diff !== 0) return diff
+    // 二级排序：bvid 升序保证跨页稳定
+    return a.bvid.localeCompare(b.bvid)
+  })
+
+  // 搜索过滤
+  const term = (opts.search || '').trim().toLowerCase()
+  if (term) {
+    list = list.filter(
+      (v) => v.title.toLowerCase().includes(term) || v.owner.toLowerCase().includes(term),
+    )
+  }
+
+  // 净化过滤
+  const purifyPercent = opts.purifyPercent ?? 0
+  if (purifyPercent > 0) {
+    list = list.filter((v) => {
+      if (v.danmaku_count_num > 10000) return true
+      return v.danmaku_count_num * 66 >= (v.play_count_num * purifyPercent) / 100
+    })
+  }
+
+  return list
+}
 
 /** fetchRankingData 成功时的返回值 */
 export interface RankingFetchResult {

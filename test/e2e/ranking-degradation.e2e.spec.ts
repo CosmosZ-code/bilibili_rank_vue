@@ -25,9 +25,9 @@ describe('排行榜降级逻辑', async () => {
 
   it('API 返回数据结构包含必需的 VideoInfo 字段', async () => {
     const data = await $fetch<Record<string, any>>('/api/ranking')
-    const entries = Object.entries(data)
+    const items = data.items
 
-    expect(entries.length).toBeGreaterThan(0)
+    expect(items.length).toBeGreaterThan(0)
 
     const requiredFields = [
       'title',
@@ -42,11 +42,11 @@ describe('排行榜降级逻辑', async () => {
       'danmaku_count',
     ]
 
-    for (const [bvid, video] of entries) {
+    for (const item of items) {
       for (const field of requiredFields) {
         expect(
-          video,
-          `视频 ${bvid} 缺少字段: ${field}`,
+          item,
+          `视频 ${item.bvid} 缺少字段: ${field}`,
         ).toHaveProperty(field)
       }
     }
@@ -55,24 +55,24 @@ describe('排行榜降级逻辑', async () => {
   it('所有视频的 bvid 键符合 BV 号格式', async () => {
     const data = await $fetch<Record<string, any>>('/api/ranking')
 
-    for (const bvid of Object.keys(data)) {
-      expect(bvid).toMatch(/^BV[a-zA-Z0-9]{10}$/)
+    for (const item of data.items) {
+      expect(item.bvid).toMatch(/^BV[a-zA-Z0-9]{10}$/)
     }
   })
 
   it('即使部分在线人数为 0，播放量和弹幕数不应全部为 0', async () => {
     const data = await $fetch<Record<string, any>>('/api/ranking')
-    const entries = Object.entries(data)
+    const items = data.items
 
     // 至少有一个视频的播放量 > 0
-    const videosWithPlayCount = entries.filter(
-      ([, video]) => video.play_count_num > 0,
+    const videosWithPlayCount = items.filter(
+      (item) => item.play_count_num > 0,
     )
     expect(videosWithPlayCount.length).toBeGreaterThan(0)
 
     // 至少有一个视频的弹幕数 > 0
-    const videosWithDanmaku = entries.filter(
-      ([, video]) => video.danmaku_count_num > 0,
+    const videosWithDanmaku = items.filter(
+      (item) => item.danmaku_count_num > 0,
     )
     expect(videosWithDanmaku.length).toBeGreaterThan(0)
   })
@@ -123,5 +123,30 @@ describe('排行榜降级逻辑', async () => {
 
     expect(data.status).toBe('ok')
     expect(data.timestamp).toBeGreaterThan(0)
+  })
+
+  it('data.timestamp 与 X-Data-Timestamp header 一致', async () => {
+    let headerTs = ''
+    const data = await $fetch<Record<string, any>>('/api/ranking', {
+      onResponse({ response }) {
+        headerTs = (response.headers as any)['x-data-timestamp'] || ''
+      },
+    })
+    expect(data.timestamp).toBeGreaterThan(0)
+    // timestamp body 和 header 一致（误差 < 2s）
+    expect(Math.abs(data.timestamp - Number(headerTs))).toBeLessThan(2000)
+  })
+
+  it('data.page / data.pageSize 为正整数', async () => {
+    const data = await $fetch<Record<string, any>>('/api/ranking')
+    expect(data.page).toBeGreaterThanOrEqual(1)
+    expect(data.pageSize).toBeGreaterThanOrEqual(1)
+    expect(Number.isInteger(data.page)).toBe(true)
+    expect(Number.isInteger(data.pageSize)).toBe(true)
+  })
+
+  it('data.hasMore 为 boolean', async () => {
+    const data = await $fetch<Record<string, any>>('/api/ranking')
+    expect(typeof data.hasMore).toBe('boolean')
   })
 })

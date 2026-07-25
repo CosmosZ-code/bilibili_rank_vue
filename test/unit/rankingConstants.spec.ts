@@ -10,6 +10,8 @@ import {
   COMBINED_CACHE_KEY,
   rankingCacheKey,
   isValidRid,
+  DEFAULT_PAGE_SIZE,
+  DEFAULT_SORT_BY,
 } from '../../server/utils/rankingConstants'
 
 describe('rankingCacheKey', () => {
@@ -85,5 +87,22 @@ describe('DEFAULT_RID', () => {
 describe('COMBINED_CACHE_KEY', () => {
   it("值为 'ranking:all'", () => {
     expect(COMBINED_CACHE_KEY).toBe('ranking:all')
+  })
+})
+
+describe('DEFAULT_PAGE_SIZE', () => {
+  it('默认值为 30', () => {
+    expect(DEFAULT_PAGE_SIZE).toBe(30)
+  })
+
+  it('为正整数', () => {
+    expect(DEFAULT_PAGE_SIZE).toBeGreaterThan(0)
+    expect(Number.isInteger(DEFAULT_PAGE_SIZE)).toBe(true)
+  })
+})
+
+describe('DEFAULT_SORT_BY', () => {
+  it("默认值为 'count'", () => {
+    expect(DEFAULT_SORT_BY).toBe('count')
   })
 })

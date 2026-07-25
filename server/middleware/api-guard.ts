@@ -12,20 +12,26 @@
  * 6. 以上都不满足            → 403 Forbidden
  */
 
-import { checkOrigin, parseAllowedOrigins } from '../utils/apiGuard'
+import { checkOrigin, parseAllowedOrigins, isLocalOrigin, extractOriginFromReferer } from '../utils/apiGuard'
 
 export default defineEventHandler((event) => {
   const config = useRuntimeConfig(event)
   const allowedOrigins = parseAllowedOrigins(config.apiGuard?.allowedOrigins ?? '')
 
-  // 开发环境自动追加本地白名单（127.0.0.1 用于 SSR 内部抓取）
+  // 开发环境：放行本地/局域网来源
   if (process.env.NODE_ENV !== 'production') {
-    allowedOrigins.push(
-      'http://localhost:3000',
-      'http://localhost:3001',
-      'http://127.0.0.1:3000',
-      'http://127.0.0.1:3001',
-    )
+    const origin = getHeader(event, 'origin')
+    if (origin && isLocalOrigin(origin)) {
+      return
+    }
+    // 部分浏览器同源 GET 不发 Origin 只发 Referer
+    const referer = getHeader(event, 'referer')
+    if (referer) {
+      const refererOrigin = extractOriginFromReferer(referer)
+      if (refererOrigin && isLocalOrigin(refererOrigin)) {
+        return
+      }
+    }
   }
 
   const headers: Record<string, string | undefined> = {

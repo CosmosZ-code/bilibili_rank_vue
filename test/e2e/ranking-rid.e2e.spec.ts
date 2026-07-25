@@ -19,7 +19,7 @@ describe('全分区排行榜 API', async () => {
     expect(typeof data).toBe('object')
     expect(data).not.toBeNull()
     // 全分区合并后应有较多视频（至少 > 10）
-    expect(Object.keys(data).length).toBeGreaterThan(10)
+    expect(data.items.length).toBeGreaterThan(10)
   })
 
   it('GET /api/ranking?rid=1 向后兼容（忽略 rid，返回全分区数据）', { timeout: 15000 }, async () => {
@@ -69,10 +69,24 @@ describe('全分区排行榜 API', async () => {
     const data3 = await $fetch<Record<string, any>>('/api/ranking?rid=3')
 
     // 相同缓存键 → 应返回相同数据
-    const keys0 = Object.keys(data0).sort()
-    const keys1 = Object.keys(data1).sort()
-    const keys3 = Object.keys(data3).sort()
+    const keys0 = data0.items.map(v => v.bvid).sort()
+    const keys1 = data1.items.map(v => v.bvid).sort()
+    const keys3 = data3.items.map(v => v.bvid).sort()
     expect(keys0).toEqual(keys1)
     expect(keys1).toEqual(keys3)
+  })
+
+  it('不同 rid 请求返回的 total 一致', { timeout: 30000 }, async () => {
+    const data0 = await $fetch<Record<string, any>>('/api/ranking')
+    const data1 = await $fetch<Record<string, any>>('/api/ranking?rid=1')
+    expect(data0.total).toBe(data1.total)
+  })
+
+  it('items 中每条记录都包含 bvid 字段', { timeout: 15000 }, async () => {
+    const data = await $fetch<Record<string, any>>('/api/ranking')
+    expect(data.items.length).toBeGreaterThan(0)
+    for (const item of data.items) {
+      expect(item.bvid).toMatch(/^BV[a-zA-Z0-9]{10}$/)
+    }
   })
 })

@@ -8,7 +8,6 @@
       <img
         :src="thumbnailUrl"
         :alt="video.title"
-        referrerpolicy="no-referrer"
         @error="onImageError"
       />
     </div>

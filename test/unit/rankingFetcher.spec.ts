@@ -29,7 +29,7 @@ vi.mock('../../server/utils/rankingConstants', () => ({
 }))
 
 // 动态导入（必须在 vi.mock 之后）
-const { retryFailedVideos, retryFailedMetadata, fetchRankingData, fetchAllRankings } = await import('../../server/utils/rankingFetcher')
+const { retryFailedVideos, retryFailedMetadata, fetchRankingData, fetchAllRankings, sortAndFilterRanking } = await import('../../server/utils/rankingFetcher')
 
 /** 创建测试用的 VideoInfo */
 function makeVideo(overrides: Partial<{
@@ -745,5 +745,32 @@ describe('fetchAllRankings — 全分区拉取', () => {
     expect(result!.data['BV_KEEP'].title).toBe('保留视频')
     expect(result!.rankingFailed).toBe(true)
     expect(result!.popularFailed).toBe(true)
+  })
+})
+
+// ============================================================
+// sortAndFilterRanking — 服务端排序过滤
+// ============================================================
+describe('sortAndFilterRanking — 服务端排序过滤', () => {
+  it('返回数组而非 Map', () => {
+    const dataMap: VideosDataMap = {
+      BV1xx: makeVideo({ title: '视频A', count_num: 100 }),
+      BV2yy: makeVideo({ title: '视频B', count_num: 500 }),
+    }
+    const result = sortAndFilterRanking(dataMap)
+    expect(Array.isArray(result)).toBe(true)
+    expect(result).toHaveLength(2)
+    // 降序排列
+    expect(result[0].bvid).toBe('BV2yy')
+    expect(result[1].bvid).toBe('BV1xx')
+  })
+
+  it('保留 bvid 字段在每条记录中', () => {
+    const dataMap: VideosDataMap = {
+      BVtest: makeVideo({ title: '测试', count_num: 200 }),
+    }
+    const result = sortAndFilterRanking(dataMap)
+    expect(result[0].bvid).toBe('BVtest')
+    expect(result[0].title).toBe('测试')
   })
 })

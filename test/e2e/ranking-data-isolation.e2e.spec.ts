@@ -66,8 +66,8 @@ describe('排行榜数据隔离', async () => {
       headers: { Cookie: 'session_id=fake-session-uuid-12345' },
     })
 
-    const keys1 = Object.keys(dataNoCookie).sort()
-    const keys2 = Object.keys(dataWithFakeCookie).sort()
+    const keys1 = dataNoCookie.items.map(v => v.bvid).sort()
+    const keys2 = dataWithFakeCookie.items.map(v => v.bvid).sort()
 
     expect(keys1.length, 'ranking 视频数量应为正').toBeGreaterThan(0)
     expect(keys1, '有/无伪造 cookie 时 BVid 集合应一致').toEqual(keys2)
@@ -77,7 +77,7 @@ describe('排行榜数据隔离', async () => {
     const data1 = await $fetch<Record<string, any>>('/api/ranking')
     const data2 = await $fetch<Record<string, any>>('/api/ranking')
 
-    expect(Object.keys(data1).length).toBe(Object.keys(data2).length)
+    expect(data1.items.length).toBe(data2.items.length)
   })
 
   it('2.3 主排行响应头不含 Set-Cookie', async () => {
@@ -109,7 +109,7 @@ describe('排行榜数据隔离', async () => {
       $fetch<Record<string, any>>('/api/ranking/personalized'),
     ])
 
-    expect(Object.keys(ranking).length, 'ranking 应有视频数据').toBeGreaterThan(0)
+    expect(ranking.items.length, 'ranking 应有视频数据').toBeGreaterThan(0)
     expect(personalized, 'personalized 无认证应返回空').toEqual({})
   })
 
@@ -130,11 +130,11 @@ describe('排行榜数据隔离', async () => {
 
   it('4.1 主排行数据结构不含个性化标记字段', { timeout: 10000 }, async () => {
     const data = await $fetch<Record<string, any>>('/api/ranking')
-    const entries = Object.entries(data)
-    expect(entries.length, 'ranking 应有视频数据').toBeGreaterThan(0)
+    const items = data.items
+    expect(items.length, 'ranking 应有视频数据').toBeGreaterThan(0)
 
     // 检查第一个视频的字段 — 不应出现个性化标记
-    const [, firstVideo] = entries[0]
+    const firstVideo = items[0]
     const suspiciousFields = ['personalized', 'recommend', 'user_specific', 'for_you']
     for (const field of suspiciousFields) {
       expect(
@@ -161,5 +161,26 @@ describe('排行榜数据隔离', async () => {
         `伪造 session_id="${fakeId.slice(0, 20)}..." 应返回空对象`,
       ).toEqual({})
     }
+  })
+
+  // ====================================================================
+  // 组 5：分页参数与数据隔离
+  // ====================================================================
+
+  it('5.1 带 fake cookie 请求的分页响应中不泄露个性化数据', { timeout: 10000 }, async () => {
+    const dataNoCookie = await $fetch<Record<string, any>>('/api/ranking')
+    const dataWithFake = await $fetch<Record<string, any>>('/api/ranking', {
+      headers: { Cookie: 'session_id=fake-session-uuid-12345' },
+    })
+    const bvids1 = dataNoCookie.items.map((v: any) => v.bvid).sort()
+    const bvids2 = dataWithFake.items.map((v: any) => v.bvid).sort()
+    expect(bvids1).toEqual(bvids2)
+  })
+
+  it('5.2 分页参数不影响隔离：page=2 正常返回', { timeout: 10000 }, async () => {
+    const data = await $fetch<Record<string, any>>('/api/ranking?page=2&pageSize=5')
+    expect(data.page).toBe(2)
+    expect(data.items.length).toBeLessThanOrEqual(5)
+    expect(typeof data.hasMore).toBe('boolean')
   })
 })

@@ -21,36 +21,36 @@ describe('API 端点 HTTP 响应', async () => {
 	    expect(data).not.toBeNull()
 	  })
 
-	  it('GET /api/ranking 返回的视频播放量和弹幕数不为 0', { timeout: 30000 }, async () => {
-	    const data = await $fetch<Record<string, any>>('/api/ranking')
-	    const entries = Object.entries(data)
-	    expect(entries.length).toBeGreaterThan(0)
+  it('GET /api/ranking 返回的视频播放量和弹幕数不为 0', { timeout: 30000 }, async () => {
+    const data = await $fetch<Record<string, any>>('/api/ranking')
+    const items = data.items
+    expect(items.length).toBeGreaterThan(0)
 
-	    // 统计非零数据的视频数量
-	    let nonZeroPlay = 0
-	    let nonZeroDanmaku = 0
-	    const zeroBvids: string[] = []
+    // 统计非零数据的视频数量
+    let nonZeroPlay = 0
+    let nonZeroDanmaku = 0
+    const zeroBvids: string[] = []
 
-	    for (const [bvid, video] of entries) {
-	      if (video.play_count_num > 0) {
-	        nonZeroPlay++
-	      } else {
-	        zeroBvids.push(`${bvid}(play)`)
-	      }
-	      if (video.danmaku_count_num > 0) {
-	        nonZeroDanmaku++
-	      } else {
-	        zeroBvids.push(`${bvid}(danmaku)`)
-	      }
-	    }
+    for (const item of items) {
+      if (item.play_count_num > 0) {
+        nonZeroPlay++
+      } else {
+        zeroBvids.push(`${item.bvid}(play)`)
+      }
+      if (item.danmaku_count_num > 0) {
+        nonZeroDanmaku++
+      } else {
+        zeroBvids.push(`${item.bvid}(danmaku)`)
+      }
+    }
 
-	    // 至少 50% 的视频应有非零播放量和弹幕数
-	    // 如果 B站 API 不可用 → 使用 mock 数据 → 100% 非零
-	    // 如果 B站 API 可用 → 真实数据大部分非零
-	    const threshold = Math.max(1, Math.floor(entries.length * 0.5))
-	    expect(nonZeroPlay, `零播放量视频过多 (${nonZeroPlay}/${entries.length})`).toBeGreaterThanOrEqual(threshold)
-	    expect(nonZeroDanmaku, `零弹幕数视频过多 (${nonZeroDanmaku}/${entries.length})`).toBeGreaterThanOrEqual(threshold)
-	  })
+    // 至少 50% 的视频应有非零播放量和弹幕数
+    // 如果 B站 API 不可用 → 使用 mock 数据 → 100% 非零
+    // 如果 B站 API 可用 → 真实数据大部分非零
+    const threshold = Math.max(1, Math.floor(items.length * 0.5))
+    expect(nonZeroPlay, `零播放量视频过多 (${nonZeroPlay}/${items.length})`).toBeGreaterThanOrEqual(threshold)
+    expect(nonZeroDanmaku, `零弹幕数视频过多 (${nonZeroDanmaku}/${items.length})`).toBeGreaterThanOrEqual(threshold)
+  })
 
   it('GET /api/banners 返回 200', async () => {
     const data = await $fetch('/api/banners')
@@ -75,5 +75,35 @@ describe('API 端点 HTTP 响应', async () => {
     } catch (err: any) {
       expect(err.statusCode || err.response?.status).toBe(401)
     }
+  })
+
+  it('RankingResponse 包含全部必需字段', { timeout: 15000 }, async () => {
+    const data = await $fetch<Record<string, any>>('/api/ranking')
+    expect(data).toHaveProperty('items')
+    expect(data).toHaveProperty('total')
+    expect(data).toHaveProperty('page')
+    expect(data).toHaveProperty('pageSize')
+    expect(data).toHaveProperty('hasMore')
+    expect(data).toHaveProperty('timestamp')
+    expect(Array.isArray(data.items)).toBe(true)
+  })
+
+  it('page=1&pageSize=10 返回 ≤10 条 items', { timeout: 15000 }, async () => {
+    const data = await $fetch<Record<string, any>>('/api/ranking?page=1&pageSize=10')
+    expect(data.items.length).toBeLessThanOrEqual(10)
+    expect(data.total).toBeGreaterThanOrEqual(data.items.length)
+    expect(data.page).toBe(1)
+    expect(data.pageSize).toBe(10)
+  })
+
+  it('page=999&pageSize=30 返回空 items', { timeout: 15000 }, async () => {
+    const data = await $fetch<Record<string, any>>('/api/ranking?page=999&pageSize=30')
+    expect(data.items).toEqual([])
+    expect(data.hasMore).toBe(false)
+  })
+
+  it('不传 pageSize 时默认 30', { timeout: 15000 }, async () => {
+    const data = await $fetch<Record<string, any>>('/api/ranking')
+    expect(data.pageSize).toBe(30)
   })
 })

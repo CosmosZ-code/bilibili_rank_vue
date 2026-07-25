@@ -31,41 +31,41 @@ describe('页面完整渲染', async () => {
 
 	it('/api/ranking 返回 mock 降级数据', async () => {
 	    const data = await $fetch<Record<string, any>>('/api/ranking')
-	    const entries = Object.entries(data)
-	    expect(entries.length).toBeGreaterThanOrEqual(8)
+	    const items = data.items
+	    expect(items.length).toBeGreaterThanOrEqual(8)
 
-	    const [bvid, video] = entries[0]
-	    expect(bvid).toMatch(/^BV/)
-	    expect(video.title).toBeTruthy()
-	    expect(video.owner).toBeTruthy()
-	    expect(typeof video.count_num).toBe('number')
-	    expect(video.count_num).toBeGreaterThan(0)
-	    expect(video.online_count).toBeTruthy()
+	    const item = items[0]
+	    expect(item.bvid).toMatch(/^BV/)
+	    expect(item.title).toBeTruthy()
+	    expect(item.owner).toBeTruthy()
+	    expect(typeof item.count_num).toBe('number')
+	    expect(item.count_num).toBeGreaterThan(0)
+	    expect(item.online_count).toBeTruthy()
 	    // 播放量和弹幕数不能为 "0" 字符串
-	    expect(video.play_count).not.toBe('0')
-	    expect(video.danmaku_count).not.toBe('0')
-	    expect(video.play_count_num).toBeGreaterThan(0)
-	    expect(video.danmaku_count_num).toBeGreaterThan(0)
+	    expect(item.play_count).not.toBe('0')
+	    expect(item.danmaku_count).not.toBe('0')
+	    expect(item.play_count_num).toBeGreaterThan(0)
+	    expect(item.danmaku_count_num).toBeGreaterThan(0)
 	  })
 
 	it('视频数据格式与旧 data.json 兼容', async () => {
 	    const data = await $fetch<Record<string, any>>('/api/ranking')
-	    for (const [bvid, video] of Object.entries(data)) {
+	    for (const item of data.items) {
 	      // 每个视频必须有这些字段
-	      expect(video).toHaveProperty('title')
-	      expect(video).toHaveProperty('owner')
-	      expect(video).toHaveProperty('mid')
-	      expect(video).toHaveProperty('pic')
-	      expect(video).toHaveProperty('online_count')
-	      expect(video).toHaveProperty('count_num')
-	      expect(video).toHaveProperty('play_count_num')
-	      expect(video).toHaveProperty('danmaku_count_num')
-	      expect(video).toHaveProperty('play_count')
-	      expect(video).toHaveProperty('danmaku_count')
+	      expect(item).toHaveProperty('title')
+	      expect(item).toHaveProperty('owner')
+	      expect(item).toHaveProperty('mid')
+	      expect(item).toHaveProperty('pic')
+	      expect(item).toHaveProperty('online_count')
+	      expect(item).toHaveProperty('count_num')
+	      expect(item).toHaveProperty('play_count_num')
+	      expect(item).toHaveProperty('danmaku_count_num')
+	      expect(item).toHaveProperty('play_count')
+	      expect(item).toHaveProperty('danmaku_count')
 	    }
 	  })
 
-	  it('SSR 渲染的视频卡片不全是零数据', async () => {
+		  it('SSR 渲染的视频卡片不全是零数据', async () => {
 	    const html = await $fetch<string>('/')
 
 	    // 验证页面包含 video-meta 区域
@@ -81,5 +81,22 @@ describe('页面完整渲染', async () => {
 	    // 正常数据如 "511万" 或 "3424"（小于1万的数字）
 	    const videoCardCount = (html.match(/video-card/g) || []).length
 	    expect(videoCardCount).toBeGreaterThan(0)
+	  })
+
+	  it('SSR 首屏 HTML 包含视频卡片', async () => {
+	    const html = await $fetch<string>('/')
+	    const data = await $fetch<Record<string, any>>('/api/ranking')
+	    // 验证 HTML 包含来自 API items 的数据
+	    const videoCardCount = (html.match(/video-card/g) || []).length
+	    expect(videoCardCount).toBeGreaterThan(0)
+	    // 验证 services 端 data items 不为空
+	    expect(data.items.length).toBeGreaterThan(0)
+	  })
+
+	  it('首屏 SSR 只传输首页数据（不传全部 500 条）', async () => {
+	    const html = await $fetch<string>('/')
+	    // SSR 应该只渲染 page 1（30 条），不应渲染 500 条
+	    const videoCardCount = (html.match(/video-card/g) || []).length
+	    expect(videoCardCount).toBeLessThan(50) // 远少于 500
 	  })
 })

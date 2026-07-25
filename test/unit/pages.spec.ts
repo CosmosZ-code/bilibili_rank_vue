@@ -51,7 +51,7 @@ describe('index.vue 页面内容验证', () => {
   it('使用 useFetch 获取数据 + useScrollToTop', async () => {
     const fs = await import('node:fs/promises')
     const content = await fs.readFile(resolve(rootDir, 'app/pages/index.vue'), 'utf-8')
-    expect(content).toContain('useFetch')
+    expect(content).toMatch(/useLazyAsyncData|useFetch/)
     expect(content).toContain('useScrollToTop')
   })
 
@@ -65,7 +65,7 @@ describe('index.vue 页面内容验证', () => {
   it('数据通过 useFetch 自动获取（SSR + CSR）', async () => {
     const fs = await import('node:fs/promises')
     const content = await fs.readFile(resolve(rootDir, 'app/pages/index.vue'), 'utf-8')
-    expect(content).toContain('useFetch')
+    expect(content).toMatch(/useLazyAsyncData|useFetch/)
     expect(content).toContain('/api/ranking')
   })
 
@@ -75,6 +75,16 @@ describe('index.vue 页面内容验证', () => {
     expect(content).toContain('@update:sortBy')
     expect(content).toContain('@update:searchTerm')
     expect(content).toContain('@update:purifyPercent')
+  })
+
+  it('包含分页相关变量和逻辑', async () => {
+    const fs = await import('node:fs/promises')
+    const content = await fs.readFile(resolve(rootDir, 'app/pages/index.vue'), 'utf-8')
+    expect(content).toContain('PAGE_SIZE')
+    expect(content).toContain('currentPage')
+    expect(content).toContain('extraItems')
+    expect(content).toContain('hasMoreFromServer')
+    expect(content).toContain('loadMore')
   })
 })
 

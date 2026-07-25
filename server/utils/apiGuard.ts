@@ -29,6 +29,20 @@ export interface GuardResult {
   reason?: string
 }
 
+/** 判断 origin 是否为本地/局域网地址（仅开发环境使用） */
+export function isLocalOrigin(origin: string): boolean {
+  try {
+    const hostname = new URL(origin).hostname
+    return (
+      hostname === 'localhost' ||
+      hostname === '127.0.0.1' ||
+      hostname.startsWith('192.168.')
+    )
+  } catch {
+    return false
+  }
+}
+
 /**
  * 核心校验逻辑
  *
