@@ -141,6 +141,7 @@ onUnmounted(() => {
 
 /** 鼠标进入触发按钮 */
 function onMouseEnter() {
+  if (isTouch.value) return
   clearCloseTimer()
   isOpen.value = true
   // 首次展开时拉取数据
@@ -154,11 +155,13 @@ function onMouseEnter() {
 
 /** 鼠标进入下拉面板（阻止关闭） */
 function onPanelEnter() {
+  if (isTouch.value) return
   clearCloseTimer()
 }
 
 /** 鼠标离开（延迟关闭） */
 function onMouseLeave() {
+  if (isTouch.value) return
   closeTimer = setTimeout(() => {
     isOpen.value = false
   }, 200)

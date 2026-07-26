@@ -180,6 +180,10 @@ describe('组件触屏适配代码结构验证', () => {
       expect(content).toContain('document.addEventListener')
     })
 
+    it('hover 处理函数包含 isTouch 守卫（防止 iOS 模拟 mouseenter 干扰两阶段点按）', () => {
+      expect(content).toContain('if (isTouch.value) return')
+    })
+
     it('liveDropdownRef 用于判断点击目标', () => {
       expect(content).toContain('ref="liveDropdownRef"')
     })
@@ -218,6 +222,13 @@ describe('组件触屏适配代码结构验证', () => {
       expect(content).toContain('historyWrapperRef')
       expect(content).toContain('historyPanelRef')
     })
+
+    it('hover 处理函数（onMouseEnter / onPanelEnter / onMouseLeave）包含 isTouch 守卫', () => {
+      // 三个 hover 处理函数各有一个 isTouch 守卫
+      const matches = content.match(/if \(isTouch\.value\) return/g)
+      expect(matches).not.toBeNull()
+      expect(matches!.length).toBeGreaterThanOrEqual(3)
+    })
   })
 
   describe('BilibiliLogin.vue — 用户菜单触屏适配', () => {
@@ -247,6 +258,12 @@ describe('组件触屏适配代码结构验证', () => {
       expect(content).toContain('userDropdownRef')
       expect(content).toContain('onDocumentClick')
     })
+
+    it('hover 处理函数（onUserEnter / onMenuEnter / onUserLeave）包含 isTouch 守卫', () => {
+      const matches = content.match(/if \(isTouch\.value\) return/g)
+      expect(matches).not.toBeNull()
+      expect(matches!.length).toBeGreaterThanOrEqual(3)
+    })
   })
 
   describe('NavDropdown.vue — 通用下拉触屏适配', () => {
@@ -274,6 +291,12 @@ describe('组件触屏适配代码结构验证', () => {
       expect(content).toContain('isClickOutside')
       expect(content).toContain('navDropdownRef')
       expect(content).toContain('onDocumentClick')
+    })
+
+    it('hover 处理函数（onMouseEnter / onMouseLeave）包含 isTouch 守卫', () => {
+      const matches = content.match(/if \(isTouch\.value\) return/g)
+      expect(matches).not.toBeNull()
+      expect(matches!.length).toBeGreaterThanOrEqual(2)
     })
   })
 })

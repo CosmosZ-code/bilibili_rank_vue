@@ -26,6 +26,7 @@ const navDropdownRef = ref<HTMLElement | null>(null)
 let closeTimer: ReturnType<typeof setTimeout> | null = null
 
 function onMouseEnter() {
+  if (isTouch.value) return
   if (closeTimer) {
     clearTimeout(closeTimer)
     closeTimer = null
@@ -34,6 +35,7 @@ function onMouseEnter() {
 }
 
 function onMouseLeave() {
+  if (isTouch.value) return
   closeTimer = setTimeout(() => {
     isOpen.value = false
   }, 200)

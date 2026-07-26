@@ -102,6 +102,7 @@ const dropdownOpen = ref(false)
 let closeTimer: ReturnType<typeof setTimeout> | null = null
 
 function onDropdownEnter() {
+  if (isTouch.value) return
   if (closeTimer) {
     clearTimeout(closeTimer)
     closeTimer = null
@@ -110,6 +111,7 @@ function onDropdownEnter() {
 }
 
 function onDropdownLeave() {
+  if (isTouch.value) return
   closeTimer = setTimeout(() => {
     dropdownOpen.value = false
   }, 200)

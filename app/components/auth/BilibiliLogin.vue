@@ -86,13 +86,16 @@ let menuCloseTimer: ReturnType<typeof setTimeout> | null = null
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
 function onUserEnter() {
+  if (isTouch.value) return
   clearMenuTimer()
   isMenuOpen.value = true
 }
 function onMenuEnter() {
+  if (isTouch.value) return
   clearMenuTimer()
 }
 function onUserLeave() {
+  if (isTouch.value) return
   menuCloseTimer = setTimeout(() => {
     isMenuOpen.value = false
   }, 200)

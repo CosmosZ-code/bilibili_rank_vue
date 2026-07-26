@@ -114,6 +114,8 @@ describe('组件关键内容验证', () => {
     expect(content).toContain('computeTriggerTap')
     // 点击外部关闭
     expect(content).toContain('onDocumentClick')
+    // hover 处理函数包含 isTouch 守卫（防止 iOS 模拟 mouseenter 干扰）
+    expect(content).toContain('if (isTouch.value) return')
   })
 
   it('HistoryDropdown 包含触屏点按适配（Teleported 面板）', async () => {
@@ -122,6 +124,8 @@ describe('组件关键内容验证', () => {
     expect(content).toContain('useTouchDevice')
     expect(content).toContain('@click="onTriggerClick"')
     expect(content).toContain('historyPanelRef') // Teleported 面板的 ref
+    // hover 处理函数包含 isTouch 守卫
+    expect(content).toContain('if (isTouch.value) return')
   })
 
   it('BilibiliLogin 包含触屏切换下拉菜单逻辑', async () => {
@@ -130,6 +134,8 @@ describe('组件关键内容验证', () => {
     expect(content).toContain('useTouchDevice')
     expect(content).toContain('onUserClick')
     expect(content).toContain('!isMenuOpen.value')
+    // hover 处理函数包含 isTouch 守卫
+    expect(content).toContain('if (isTouch.value) return')
   })
 
   it('NavDropdown 包含触屏点按切换逻辑', async () => {
@@ -137,6 +143,8 @@ describe('组件关键内容验证', () => {
     const content = await fs.readFile(resolve(componentsDir, 'nav/NavDropdown.vue'), 'utf-8')
     expect(content).toContain('useTouchDevice')
     expect(content).toContain('onTriggerClick')
+    // hover 处理函数包含 isTouch 守卫
+    expect(content).toContain('if (isTouch.value) return')
   })
 
   it('BackToTop 按钮初始 opacity=0（隐藏）', async () => {

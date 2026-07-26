@@ -32,7 +32,7 @@
           <!-- 加载更多 -->
           <div v-if="hasMoreFromServer" class="load-more" @click="loadMore">
             <span v-if="isLoadingMore">加载中...</span>
-            <span v-else>加载更多 ↓</span>
+            <span v-else>加载更多...</span>
           </div>
           <div v-else-if="!effectiveVideoLoading && displayedVideos.length > 0" class="load-more load-more--end">
             已展示全部 {{ displayedVideos.length }} 条结果
@@ -50,7 +50,7 @@
           <!-- 加载更多 -->
           <div v-if="liveHasMoreFromServer" class="load-more" @click="loadMoreLive">
             <span v-if="liveIsLoadingMore">加载中...</span>
-            <span v-else>加载更多 ↓</span>
+            <span v-else>加载更多...</span>
           </div>
           <div v-else-if="!effectiveLiveLoading && displayedLiveRooms.length > 0" class="load-more load-more--end">
             已展示全部 {{ displayedLiveRooms.length }} 条结果
@@ -130,7 +130,7 @@ function onSearchTermChange(val: string) {
 }
 
 // ============================================================
-// 视频模式：原有状态
+// 视频模式
 // ============================================================
 const sortBy = ref<'count'>('count')
 const purifyPercent = useCookie<number>('purify_percent', { default: () => 10 })
@@ -246,7 +246,7 @@ const error = computed(() => {
 })
 
 // ============================================================
-// 直播模式：新增状态
+// 直播模式
 // ============================================================
 const areaId = ref(0)
 const liveCurrentPage = ref(1)
