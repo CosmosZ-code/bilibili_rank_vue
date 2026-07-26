@@ -20,13 +20,14 @@ describe('页面完整渲染', async () => {
     expect(html).toContain('--b-blue')
   })
 
-  it('SSR 阶段已渲染视频卡片（useFetch 在服务端获取数据）', async () => {
+  it('SSR 阶段渲染骨架屏（server: false 不在服务端获取数据）', async () => {
     const html = await $fetch<string>('/')
-    // mock 数据至少有一张卡片
+    // 骨架屏使用 video-card skeleton 类
     expect(html).toContain('video-card')
-    expect(html).toContain('rank-badge')
-    // 不应该显示"没有找到匹配"
-    expect(html).not.toContain('没有找到匹配的视频')
+    expect(html).toContain('skeleton-box')
+    // 不应该包含真实视频卡片特有元素
+    expect(html).not.toContain('rank-badge')
+    expect(html).not.toContain('video-meta')
   })
 
 	it('/api/ranking 返回 mock 降级数据', async () => {
@@ -65,38 +66,37 @@ describe('页面完整渲染', async () => {
 	    }
 	  })
 
-		  it('SSR 渲染的视频卡片不全是零数据', async () => {
-	    const html = await $fetch<string>('/')
+  it('SSR 页面壳渲染正确，骨架屏不含真实数据', async () => {
+    const html = await $fetch<string>('/')
+    // 骨架屏标记
+    expect(html).toContain('skeleton-box')
+    expect(html).toContain('skeleton-line')
+    // 不含真实数据标记（server: false 阻止服务端数据加载）
+    expect(html).not.toContain('rank-badge')
+    expect(html).not.toContain('video-meta')
+    // 骨架屏数量合理（12 个骨架卡片）
+    const videoCardCount = (html.match(/video-card/g) || []).length
+    expect(videoCardCount).toBeGreaterThan(0)
+    expect(videoCardCount).toBeLessThan(50)
+  })
 
-	    // 验证页面包含 video-meta 区域
-	    expect(html).toContain('video-meta')
+  it('SSR 不包含真实榜单数据，API 独立正常运行', async () => {
+    const html = await $fetch<string>('/')
+    const data = await $fetch<Record<string, any>>('/api/ranking')
+    // API 仍正常返回视频数据
+    expect(data.items.length).toBeGreaterThan(0)
+    // SSR HTML 不包含真实数据标记（server: false 确保仅客户端加载）
+    expect(html).not.toContain('rank-badge')
+    expect(html).not.toContain('video-meta')
+  })
 
-	    // 提取所有 video-meta 区域的文本内容
-	    // 正常数据应包含中文单位（万、亿）或非零数字
-	    const hasFormattedCount = html.includes('万<') || html.includes('亿<')
-	    // 如果所有数据都是 "0"，则不会有中文单位
-	    expect(hasFormattedCount).toBe(true)
-
-	    // 额外的烟雾测试：不应该出现孤立的 ">0<" 模式
-	    // 正常数据如 "511万" 或 "3424"（小于1万的数字）
-	    const videoCardCount = (html.match(/video-card/g) || []).length
-	    expect(videoCardCount).toBeGreaterThan(0)
-	  })
-
-	  it('SSR 首屏 HTML 包含视频卡片', async () => {
-	    const html = await $fetch<string>('/')
-	    const data = await $fetch<Record<string, any>>('/api/ranking')
-	    // 验证 HTML 包含来自 API items 的数据
-	    const videoCardCount = (html.match(/video-card/g) || []).length
-	    expect(videoCardCount).toBeGreaterThan(0)
-	    // 验证 services 端 data items 不为空
-	    expect(data.items.length).toBeGreaterThan(0)
-	  })
-
-	  it('首屏 SSR 只传输首页数据（不传全部 500 条）', async () => {
-	    const html = await $fetch<string>('/')
-	    // SSR 应该只渲染 page 1（30 条），不应渲染 500 条
-	    const videoCardCount = (html.match(/video-card/g) || []).length
-	    expect(videoCardCount).toBeLessThan(50) // 远少于 500
-	  })
+  it('首屏 SSR 只渲染骨架屏（server: false 不传榜单数据）', async () => {
+    const html = await $fetch<string>('/')
+    // 骨架屏 12 个，远少于真实数据量
+    const videoCardCount = (html.match(/video-card/g) || []).length
+    expect(videoCardCount).toBeLessThan(50)
+    // 无真实榜单数据
+    expect(html).not.toContain('rank-badge')
+    expect(html).not.toContain('video-meta')
+  })
 })

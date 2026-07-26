@@ -37,6 +37,11 @@ export default defineNuxtConfig({
     },
   },
 
+  // Route rules
+  routeRules: {
+    '/': { swr: 600 },
+  },
+
   // Nitro server config
   nitro: {
     // 部署预设：node-server（可改为 vercel, cloudflare-pages, netlify 等）

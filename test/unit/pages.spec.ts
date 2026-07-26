@@ -63,12 +63,14 @@ describe('index.vue 页面内容验证', () => {
     expect(content).toContain('bilibili')
   })
 
-  it('数据通过 useFetch 自动获取（SSR + CSR）', async () => {
+  it('数据仅通过客户端获取（server: false 阻止 SSR 数据加载），直播数据延迟加载', async () => {
     const fs = await import('node:fs/promises')
     const content = await fs.readFile(resolve(rootDir, 'app/pages/index.vue'), 'utf-8')
     expect(content).toMatch(/useLazyAsyncData|useFetch/)
     expect(content).toContain('/api/ranking')
     expect(content).toContain('/api/live-rooms')
+    expect(content).toContain('server: false')
+    expect(content).toContain('liveDataEnabled')  // Step 2: 直播延迟加载
   })
 
   it('双向绑定 viewMode/searchTerm/purifyPercent/areaId', async () => {

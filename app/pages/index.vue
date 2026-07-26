@@ -25,7 +25,7 @@
         <template v-if="viewMode === 'videos'">
           <VideoGrid
             :videos="displayedVideos"
-            :isLoading="isLoading"
+            :isLoading="videoLoading"
             :error="error"
           />
 
@@ -34,7 +34,7 @@
             <span v-if="isLoadingMore">加载中...</span>
             <span v-else>加载更多 ↓</span>
           </div>
-          <div v-else-if="!isLoading && displayedVideos.length > 0" class="load-more load-more--end">
+          <div v-else-if="!videoLoading && displayedVideos.length > 0" class="load-more load-more--end">
             已展示全部 {{ displayedVideos.length }} 条结果
           </div>
         </template>
@@ -43,7 +43,7 @@
         <template v-else>
           <LiveGrid
             :rooms="displayedLiveRooms"
-            :isLoading="liveIsLoading"
+            :isLoading="liveLoading"
             :error="liveError"
           />
 
@@ -52,7 +52,7 @@
             <span v-if="liveIsLoadingMore">加载中...</span>
             <span v-else>加载更多 ↓</span>
           </div>
-          <div v-else-if="!liveIsLoading && displayedLiveRooms.length > 0" class="load-more load-more--end">
+          <div v-else-if="!liveLoading && displayedLiveRooms.length > 0" class="load-more load-more--end">
             已展示全部 {{ displayedLiveRooms.length }} 条结果
           </div>
         </template>
@@ -203,12 +203,15 @@ function buildQuery(page: number) {
   }
 }
 
-// 视频首页数据（SSR + 响应式 refetch，仅在 videos 模式活跃时 watch）
+// 视频首页数据（server: false 仅在客户端获取，SSR 时强制显示骨架屏）
 const { data: page1Data, pending: isLoading, error: fetchError } = useLazyAsyncData(
   'ranking',
   () => $fetch<RankingResponse>('/api/ranking', { query: buildQuery(1) }),
-  { watch: [videoSearchTerm, purifyPercent, sortBy] },
+  { watch: [videoSearchTerm, purifyPercent, sortBy], server: false },
 )
+
+// SSR 阶段 server: false 导致 pending=false，需强制 loading 状态以显示骨架屏
+const videoLoading = computed(() => isLoading.value || import.meta.server)
 
 const displayedVideos = computed(() => {
   const page1 = page1Data.value?.items || []
@@ -286,12 +289,20 @@ function buildLiveQuery(page: number) {
   }
 }
 
-// 直播首页数据（仅在 live 模式活跃时 watch）
+// 直播首页数据（延迟加载：仅客户端 + 直播模式才获取）
+const liveDataEnabled = ref(import.meta.client && viewMode.value === 'live')
+
 const { data: livePage1Data, pending: liveIsLoading, error: liveFetchError } = useLazyAsyncData(
   'live-ranking',
-  () => $fetch<LiveRankingResponse>('/api/live-rooms', { query: buildLiveQuery(1) }),
-  { watch: [liveSearchTerm, areaId] },
+  () => {
+    if (!liveDataEnabled.value) return undefined as any
+    return $fetch<LiveRankingResponse>('/api/live-rooms', { query: buildLiveQuery(1) })
+  },
+  { watch: [liveSearchTerm, areaId, liveDataEnabled], server: false },
 )
+
+// SSR 阶段强制 loading 状态以显示骨架屏
+const liveLoading = computed(() => liveIsLoading.value || import.meta.server)
 
 const displayedLiveRooms = computed(() => {
   const page1 = livePage1Data.value?.items || []
@@ -331,9 +342,11 @@ const liveError = computed(() => {
   return null
 })
 
-// 切换视图时重置分页状态
-watch(viewMode, async (mode) => {
+// 切换视图时重置分页状态 + 首次切换到直播时触发数据加载
+watch(viewMode, (mode) => {
   if (mode === 'live') {
+    // 首次切换到直播：启用数据加载（watch 中的 liveDataEnabled 变化会触发 API）
+    liveDataEnabled.value = true
     // 重置直播分页
     liveExtraItems.value = []
     liveCurrentPage.value = 1
