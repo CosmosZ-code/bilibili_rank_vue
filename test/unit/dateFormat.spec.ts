@@ -3,23 +3,10 @@
  *
  * 验证 toLocaleString('zh-CN', { ... }) 在固定 options 下输出确定且可预测，
  * 确保服务端（Node.js）和客户端（浏览器）渲染一致，避免 hydration mismatch。
+ * 从 app/utils/date.ts 导入生产代码。
  */
 import { describe, it, expect } from 'vitest'
-
-// 与 app/pages/index.vue 中保持一致的格式化选项
-const DATE_LOCALE_OPTIONS: Intl.DateTimeFormatOptions = {
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
-  hour12: false,
-}
-
-function formatDate(ts: number | Date): string {
-  return new Date(ts).toLocaleString('zh-CN', DATE_LOCALE_OPTIONS)
-}
+import { formatDate, DATE_LOCALE_OPTIONS } from '../../app/utils/date'
 
 describe('formatDate — 固定格式日期', () => {
   it('输出包含年/月/日/时/分/秒（固定格式，无地区差异）', () => {

@@ -10,29 +10,16 @@
  * - dedupByBvid: 去重逻辑
  */
 import { describe, it, expect } from 'vitest'
-import { formatCount, parseChineseNumber, ensureHttps, dedupByBvid } from '../../server/utils/bilibili'
+import {
+  formatCount,
+  parseChineseNumber,
+  ensureHttps,
+  dedupByBvid,
+  getMixinKey,
+  signWbiParams,
+} from '../../server/utils/bilibili'
 
-// 测试 WBI 签名相关的内部函数
-// getMixinKey 是模块内部函数，我们通过已知的输入/输出测试逻辑
 describe('WBI 签名逻辑验证', () => {
-  // 实现 getMixinKey 的副本（模块内部函数，不便导出，复制一份用于测试）
-  const MIXIN_KEY_ENC_TAB = [
-    46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35,
-    27, 43, 5, 49, 33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13,
-    37, 48, 7, 16, 24, 55, 40, 61, 26, 17, 0, 1, 60, 51, 30, 4,
-    22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36, 20, 52, 44, 34,
-  ]
-
-  function getMixinKey(orig: string): string {
-    const chars: string[] = []
-    for (const idx of MIXIN_KEY_ENC_TAB) {
-      if (idx < orig.length) {
-        chars.push(orig[idx])
-      }
-    }
-    return chars.join('').slice(0, 32)
-  }
-
   it('getMixinKey 生成 32 字符长度的密钥', () => {
     const imgKey = '7cd084941338484aae1ad9425b84077c'
     const subKey = 'a5d6e7f83b4c2d1a9e8f7c6b5a4d3e2f'
@@ -65,33 +52,6 @@ describe('WBI 签名逻辑验证', () => {
   })
 
   it('signWbiParams 生成 w_rid 和 wts', () => {
-    const { createHash } = require('node:crypto')
-
-    function signWbiParams(
-      params: Record<string, string | number>,
-      imgKey: string,
-      subKey: string,
-    ): { w_rid: string; wts: number } {
-      const mixinKey = getMixinKey(imgKey + subKey)
-      const wts = Math.floor(Date.now() / 1000)
-
-      const allParams = { ...params, wts }
-      const sortedKeys = Object.keys(allParams).sort()
-
-      const chrFilter = /[!'()*]/g
-      const queryParts = sortedKeys.map((key) => {
-        const value = String(allParams[key]).replace(chrFilter, '')
-        return `${encodeURIComponent(key)}=${encodeURIComponent(value)}`
-      })
-      const queryString = queryParts.join('&')
-
-      const wRid = createHash('md5')
-        .update(queryString + mixinKey)
-        .digest('hex')
-
-      return { w_rid: wRid, wts }
-    }
-
     const imgKey = '7cd084941338484aae1ad9425b84077c'
     const subKey = 'a5d6e7f83b4c2d1a9e8f7c6b5a4d3e2f'
     const params = { rid: '0', type: 'all' }
@@ -109,37 +69,11 @@ describe('WBI 签名逻辑验证', () => {
   })
 
   it('WBI 签名参数值中 !\'()* 字符被过滤', () => {
-    const { createHash } = require('node:crypto')
-
-    function signWbiParams(
-      params: Record<string, string | number>,
-      imgKey: string,
-      subKey: string,
-    ): { w_rid: string; wts: number } {
-      const mixinKey = getMixinKey(imgKey + subKey)
-      const wts = 1234567890
-
-      const allParams = { ...params, wts }
-      const sortedKeys = Object.keys(allParams).sort()
-
-      const chrFilter = /[!'()*]/g
-      const queryParts = sortedKeys.map((key) => {
-        const value = String(allParams[key]).replace(chrFilter, '')
-        return `${encodeURIComponent(key)}=${encodeURIComponent(value)}`
-      })
-      const queryString = queryParts.join('&')
-
-      const wRid = createHash('md5')
-        .update(queryString + mixinKey)
-        .digest('hex')
-
-      return { w_rid: wRid, wts }
-    }
-
     const imgKey = '7cd084941338484aae1ad9425b84077c'
     const subKey = 'a5d6e7f83b4c2d1a9e8f7c6b5a4d3e2f'
 
     // 包含 !'()* 的参数值应与过滤后相同参数的签名一致
+    // （两次调用在同一秒内，wts 相同 → w_rid 相同）
     const result1 = signWbiParams({ q: "test!qu'ery(v)al*ue" }, imgKey, subKey)
     const result2 = signWbiParams({ q: 'testqueryvalue' }, imgKey, subKey)
 
@@ -147,33 +81,6 @@ describe('WBI 签名逻辑验证', () => {
   })
 
   it('WBI 签名参数顺序无关（排序后一致）', () => {
-    const { createHash } = require('node:crypto')
-
-    function signWbiParams(
-      params: Record<string, string | number>,
-      imgKey: string,
-      subKey: string,
-    ): { w_rid: string; wts: number } {
-      const mixinKey = getMixinKey(imgKey + subKey)
-      const wts = 1234567890 // 固定时间戳便于比较
-
-      const allParams = { ...params, wts }
-      const sortedKeys = Object.keys(allParams).sort()
-
-      const chrFilter = /[!'()*]/g
-      const queryParts = sortedKeys.map((key) => {
-        const value = String(allParams[key]).replace(chrFilter, '')
-        return `${encodeURIComponent(key)}=${encodeURIComponent(value)}`
-      })
-      const queryString = queryParts.join('&')
-
-      const wRid = createHash('md5')
-        .update(queryString + mixinKey)
-        .digest('hex')
-
-      return { w_rid: wRid, wts }
-    }
-
     const imgKey = '7cd084941338484aae1ad9425b84077c'
     const subKey = 'a5d6e7f83b4c2d1a9e8f7c6b5a4d3e2f'
 

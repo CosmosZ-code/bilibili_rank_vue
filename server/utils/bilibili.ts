@@ -103,7 +103,7 @@ async function fetchWbiKeys(): Promise<{ imgKey: string; subKey: string }> {
  * 3. 参数按 key 排序 → URL 编码 → 追加 mixinKey → MD5 → w_rid
  * 4. 添加当前时间戳 wts
  */
-function getMixinKey(orig: string): string {
+export function getMixinKey(orig: string): string {
   const chars: string[] = []
   for (const idx of MIXIN_KEY_ENC_TAB) {
     if (idx < orig.length) {
@@ -113,7 +113,7 @@ function getMixinKey(orig: string): string {
   return chars.join('').slice(0, 32)
 }
 
-function signWbiParams(
+export function signWbiParams(
   params: Record<string, string | number>,
   imgKey: string,
   subKey: string,

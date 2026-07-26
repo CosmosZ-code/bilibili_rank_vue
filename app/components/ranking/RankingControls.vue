@@ -125,10 +125,10 @@ function selectArea(id: number) {
 
 // 点击"直播"文字：桌面直接切全站；触屏两阶段（首次展开，二次切全站）
 function clickLive() {
-  if (isTouch.value && !dropdownOpen.value) {
-    // 触屏首次点按：仅展开下拉
+  const { shouldOpen, shouldTriggerAction } = computeTriggerTap(isTouch.value, dropdownOpen.value)
+  if (shouldOpen) {
     dropdownOpen.value = true
-    return
+    if (!shouldTriggerAction) return
   }
   // 桌面点击 或 触屏二次点击：切直播全站
   emit('update:viewMode', 'live')
@@ -139,8 +139,7 @@ function clickLive() {
 // 点击 document 外部关闭下拉（仅触屏设备开启时有效）
 function onDocumentClick(e: MouseEvent) {
   if (!isTouch.value || !dropdownOpen.value) return
-  const el = liveDropdownRef.value
-  if (el && !el.contains(e.target as Node)) {
+  if (isClickOutside(e.target as Node, [liveDropdownRef.value])) {
     dropdownOpen.value = false
   }
 }

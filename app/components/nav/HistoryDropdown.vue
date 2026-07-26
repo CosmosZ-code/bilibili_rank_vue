@@ -126,12 +126,9 @@ function updatePanelPosition() {
 /** 触屏设备：点击下拉外部时关闭 */
 function onDocumentClick(e: MouseEvent) {
   if (!isTouch.value || !isOpen.value) return
-  const wrapper = historyWrapperRef.value
-  const panel = historyPanelRef.value
-  const target = e.target as Node
-  // 点击在 wrapper 或 teleported panel 内部时不关闭
-  if ((wrapper && wrapper.contains(target)) || (panel && panel.contains(target))) return
-  isOpen.value = false
+  if (isClickOutside(e.target as Node, [historyWrapperRef.value, historyPanelRef.value])) {
+    isOpen.value = false
+  }
 }
 
 onMounted(() => {
@@ -172,7 +169,8 @@ function onMouseLeave() {
  *  第二次点按：正常跳转到历史页面 */
 function onTriggerClick(e: MouseEvent) {
   if (!isTouch.value) return
-  if (!isOpen.value) {
+  const { shouldOpen, shouldTriggerAction } = computeTriggerTap(isTouch.value, isOpen.value)
+  if (shouldOpen && !shouldTriggerAction) {
     e.preventDefault()
     isOpen.value = true
     // 首次展开时拉取数据
@@ -181,6 +179,7 @@ function onTriggerClick(e: MouseEvent) {
       fetchHistory()
     }
     nextTick(updatePanelPosition)
+    return
   }
   // 第二次点按：不阻止默认行为，正常跳转
 }

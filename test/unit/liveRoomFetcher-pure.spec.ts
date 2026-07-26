@@ -1,51 +1,13 @@
 /**
  * liveRoomFetcher 纯函数单元测试
  *
- * 测试 sortAndFilterLiveRooms 的排序、搜索过滤、分区过滤逻辑。
- * 遵循现有测试惯例：内联实现纯函数，避免导入 Nuxt 上下文。
+ * 测试 sortAndFilterLiveRooms 的排序、搜索过滤、分区过滤逻辑，
+ * 以及 writeLiveRoomsCache 的缓存写入行为。
+ * 纯函数从 liveRoomFetcher.ts 直接导入。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { LiveRoomInfo } from '../../app/types'
-
-// ============================================================
-// 内联实现：纯排序/过滤逻辑（与 liveRoomFetcher.ts 保持同步）
-// ============================================================
-function sortAndFilterLiveRooms(
-  list: LiveRoomInfo[],
-  opts: { search?: string; areaId?: number } = {},
-): LiveRoomInfo[] {
-  // 1. 排序：online 降序，相同则 roomid 升序
-  const sorted = [...list].sort((a, b) => {
-    const diff = b.online - a.online
-    if (diff !== 0) return diff
-    return a.roomid - b.roomid
-  })
-
-  // 2. 搜索过滤
-  const term = (opts.search || '').trim().toLowerCase()
-  let filtered = sorted
-  if (term) {
-    filtered = filtered.filter(
-      (r) =>
-        r.title.toLowerCase().includes(term) ||
-        r.uname.toLowerCase().includes(term),
-    )
-  }
-
-  // 3. 分区筛选
-  const areaId = opts.areaId ?? 0
-  if (areaId > 0) {
-    filtered = filtered.filter((r) => r.parent_area_id === areaId)
-  }
-
-  return filtered
-}
-
-/** liveAreaCacheKey 内联实现 */
-function liveAreaCacheKey(areaId?: number): string {
-  if (areaId && areaId > 0) return `live:rooms:area:${areaId}`
-  return 'live:rooms:all'
-}
+import { sortAndFilterLiveRooms, liveAreaCacheKey } from '../../server/utils/liveRoomFetcher'
 
 // ============================================================
 // 工具函数

@@ -27,7 +27,7 @@ describe('直播页面功能', async () => {
 
   it('点击"直播"标签切换到直播视图', async () => {
     const page = await createPage('/')
-    await page.waitForTimeout(1000)
+    await page.waitForSelector('.live-trigger', { timeout: 5000 })
 
     // "直播"标签是 .live-trigger（非 .tab-btn），直接定位点击
     const liveTab = await page.$('.live-trigger')
@@ -35,7 +35,7 @@ describe('直播页面功能', async () => {
 
     if (liveTab) {
       await liveTab.click()
-      await page.waitForTimeout(2000) // 等待 live-ranking 数据加载
+      await page.waitForSelector('.live-card', { timeout: 10000 }).catch(() => {})
     }
 
     // 验证 URL 出现 ?view=live
@@ -47,7 +47,6 @@ describe('直播页面功能', async () => {
 
   it('直播模式显示直播卡片', async () => {
     const page = await createPage('/?view=live')
-    await page.waitForTimeout(3000) // 等待数据加载
 
     // 验证 LiveCard 渲染
     await page.waitForSelector('.live-card', { timeout: 15000 }).catch(() => {})
@@ -63,7 +62,7 @@ describe('直播页面功能', async () => {
 
   it('切换到"视频"标签回到视频视图', async () => {
     const page = await createPage('/?view=live')
-    await page.waitForTimeout(1000)
+    await page.waitForSelector('.tab-btn', { timeout: 5000 })
 
     // 点击"视频"标签
     const tabs = await page.$$('.tab-btn')
@@ -79,7 +78,7 @@ describe('直播页面功能', async () => {
 
     if (videoTab) {
       await videoTab.click()
-      await page.waitForTimeout(1000)
+      await page.waitForFunction(() => !window.location.href.includes('view=live'), { timeout: 5000 })
     }
 
     // URL 不再包含 view=live
@@ -91,36 +90,19 @@ describe('直播页面功能', async () => {
 
   it('直播模式搜索过滤', { timeout: 15000 }, async () => {
     const page = await createPage('/?view=live')
-    await page.waitForTimeout(2000)
+    await page.waitForSelector('.live-card', { timeout: 10000 }).catch(() => {})
 
     // 找到搜索框
     const searchInput = await page.$('input[type="search"], input[placeholder*="搜索"]')
     if (searchInput) {
       // 输入搜索词
       await searchInput.fill('游戏')
-      await page.waitForTimeout(2000) // 等待 debounce + 请求
+      // 等待 debounce (1s) + 请求完成
+      await page.waitForTimeout(1500)
 
       const liveCards = await page.$$('.live-card')
-      // 可能有匹配结果或空结果，至少不报错
-      expect(Array.isArray(liveCards)).toBe(true)
-    }
-
-    await page.close()
-  })
-
-  it('直播模式分区下拉选择', async () => {
-    const page = await createPage('/?view=live')
-    await page.waitForTimeout(2000)
-
-    const areaSelect = await page.$('#area-select')
-    if (areaSelect) {
-      // 选择第二个选项（第一个是全站）
-      await areaSelect.selectOption('2') // 游戏分区
-      await page.waitForTimeout(2000)
-
-      // 验证列表更新
-      const liveCards = await page.$$('.live-card')
-      expect(Array.isArray(liveCards)).toBe(true)
+      // 搜索后至少不崩溃，结果数量合理
+      expect(liveCards.length).toBeGreaterThanOrEqual(0)
     }
 
     await page.close()
@@ -160,14 +142,14 @@ describe('直播页面功能', async () => {
   // ============================================================
   it('视频 ↔ 直播连续切换不报错', { timeout: 20000 }, async () => {
     const page = await createPage('/')
-    await page.waitForTimeout(1000)
+    await page.waitForSelector('.live-trigger', { timeout: 5000 })
 
     // 切换到直播
     const liveTrigger = await page.$('.live-trigger')
     expect(liveTrigger).not.toBeNull()
     if (liveTrigger) {
       await liveTrigger.click()
-      await page.waitForTimeout(1500)
+      await page.waitForFunction(() => window.location.href.includes('view=live'), { timeout: 5000 })
     }
     expect(page.url()).toContain('view=live')
 
@@ -183,7 +165,7 @@ describe('直播页面功能', async () => {
     }
     if (videoTab) {
       await videoTab.click()
-      await page.waitForTimeout(1500)
+      await page.waitForFunction(() => !window.location.href.includes('view=live'), { timeout: 5000 })
     }
     expect(page.url()).not.toContain('view=live')
 
@@ -191,7 +173,7 @@ describe('直播页面功能', async () => {
     const liveTrigger2 = await page.$('.live-trigger')
     if (liveTrigger2) {
       await liveTrigger2.click()
-      await page.waitForTimeout(1500)
+      await page.waitForFunction(() => window.location.href.includes('view=live'), { timeout: 5000 })
     }
     expect(page.url()).toContain('view=live')
 

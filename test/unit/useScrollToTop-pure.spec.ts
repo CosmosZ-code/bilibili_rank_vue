@@ -1,47 +1,50 @@
 /**
- * useScrollToTop 逻辑单元测试
+ * isPastScrollThreshold 纯函数单元测试
  *
- * 测试返回顶部按钮的显示阈值逻辑
+ * 从 useScrollToTop composable 导入，测试滚动阈值判断的边界行为。
  */
 import { describe, it, expect } from 'vitest'
+import { isPastScrollThreshold } from '../../app/composables/useScrollToTop'
 
-describe('返回顶部 — 阈值逻辑', () => {
-  it('scrollY > 300 时显示按钮', () => {
-    const threshold = 300
+describe('isPastScrollThreshold — 滚动阈值判断', () => {
+  const DEFAULT_THRESHOLD = 300
 
-    // 模拟不同 scrollY 值
-    expect(500 > threshold).toBe(true) // 显示
-    expect(301 > threshold).toBe(true) // 显示
-    expect(300 > threshold).toBe(false) // 不显示（等于阈值）
+  it('scrollY > 阈值时返回 true（显示按钮）', () => {
+    expect(isPastScrollThreshold(500, DEFAULT_THRESHOLD)).toBe(true)
+    expect(isPastScrollThreshold(301, DEFAULT_THRESHOLD)).toBe(true)
   })
 
-  it('scrollY <= 300 时隐藏按钮', () => {
-    const threshold = 300
-
-    expect(300 > threshold).toBe(false)
-    expect(150 > threshold).toBe(false)
-    expect(0 > threshold).toBe(false)
+  it('scrollY <= 阈值时返回 false（隐藏按钮）', () => {
+    expect(isPastScrollThreshold(300, DEFAULT_THRESHOLD)).toBe(false)
+    expect(isPastScrollThreshold(150, DEFAULT_THRESHOLD)).toBe(false)
+    expect(isPastScrollThreshold(0, DEFAULT_THRESHOLD)).toBe(false)
   })
 
   it('自定义阈值正常工作', () => {
     const threshold = 500
-
-    expect(501 > threshold).toBe(true)
-    expect(500 > threshold).toBe(false)
-    expect(100 > threshold).toBe(false)
+    expect(isPastScrollThreshold(501, threshold)).toBe(true)
+    expect(isPastScrollThreshold(500, threshold)).toBe(false)
+    expect(isPastScrollThreshold(100, threshold)).toBe(false)
   })
 
-  it('scrollY 为 undefined/NaN 时的安全处理', () => {
-    const threshold = 300
+  it('scrollY 为 NaN 时返回 false', () => {
+    expect(isPastScrollThreshold(NaN, DEFAULT_THRESHOLD)).toBe(false)
+  })
 
-    // NaN 比较总是 false
-    const scrollY = NaN
-    const show = !isNaN(scrollY) && scrollY > threshold
-    expect(show).toBe(false)
+  it('scrollY 为 Infinity 时返回 true', () => {
+    expect(isPastScrollThreshold(Infinity, DEFAULT_THRESHOLD)).toBe(true)
+  })
 
-    // undefined
-    const scrollY2 = undefined as unknown as number
-    const show2 = typeof scrollY2 === 'number' && scrollY2 > threshold
-    expect(show2).toBe(false)
+  it('scrollY 为负值时返回 false', () => {
+    expect(isPastScrollThreshold(-100, DEFAULT_THRESHOLD)).toBe(false)
+  })
+
+  it('阈值为 0 时 scrollY > 0 返回 true', () => {
+    expect(isPastScrollThreshold(1, 0)).toBe(true)
+    expect(isPastScrollThreshold(0, 0)).toBe(false)
+  })
+
+  it('极大阈值下 scrollY 不通过', () => {
+    expect(isPastScrollThreshold(1000, 10000)).toBe(false)
   })
 })

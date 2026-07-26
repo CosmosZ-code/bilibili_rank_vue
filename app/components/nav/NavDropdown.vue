@@ -48,9 +48,7 @@ function onTriggerClick() {
 /** 触屏设备：点击下拉外部时关闭 */
 function onDocumentClick(e: MouseEvent) {
   if (!isTouch.value || !isOpen.value) return
-  const el = navDropdownRef.value
-  if (!el) return
-  if (!el.contains(e.target as Node)) {
+  if (isClickOutside(e.target as Node, [navDropdownRef.value])) {
     isOpen.value = false
   }
 }

@@ -110,8 +110,8 @@ describe('组件关键内容验证', () => {
     const content = await fs.readFile(resolve(componentsDir, 'ranking/RankingControls.vue'), 'utf-8')
     // 引入触屏检测
     expect(content).toContain('useTouchDevice')
-    // 两阶段点按：首次展开，二次触发
-    expect(content).toContain('isTouch.value && !dropdownOpen.value')
+    // 两阶段点按：computeTriggerTap 替换了原有内联判断
+    expect(content).toContain('computeTriggerTap')
     // 点击外部关闭
     expect(content).toContain('onDocumentClick')
   })

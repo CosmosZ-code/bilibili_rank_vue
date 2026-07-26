@@ -6,44 +6,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import type { VideosDataMap, VideoInfo } from '../../app/types'
-
-// 动态导入 sortAndFilterRanking（需要 mock bilibili 模块的依赖才能导入 rankingFetcher）
-// 这里直接测试纯逻辑，内联实现以保持单元测试独立性
-function sortAndFilterRanking(
-  dataMap: VideosDataMap,
-  opts: { sortBy?: string; search?: string; purifyPercent?: number } = {},
-): Array<VideoInfo & { bvid: string }> {
-  let list: Array<VideoInfo & { bvid: string }> = Object.entries(dataMap).map(([bvid, info]) => ({
-    bvid,
-    ...info,
-  }))
-
-  // 排序：count_num 降序，相同则 bvid 升序
-  list.sort((a, b) => {
-    const diff = b.count_num - a.count_num
-    if (diff !== 0) return diff
-    return a.bvid.localeCompare(b.bvid)
-  })
-
-  // 搜索过滤
-  const term = (opts.search || '').trim().toLowerCase()
-  if (term) {
-    list = list.filter(
-      (v) => v.title.toLowerCase().includes(term) || v.owner.toLowerCase().includes(term),
-    )
-  }
-
-  // 净化过滤
-  const purifyPercent = opts.purifyPercent ?? 0
-  if (purifyPercent > 0) {
-    list = list.filter((v) => {
-      if (v.danmaku_count_num > 10000) return true
-      return v.danmaku_count_num * 66 >= (v.play_count_num * purifyPercent) / 100
-    })
-  }
-
-  return list
-}
+import { sortAndFilterRanking } from '../../server/utils/rankingFetcher'
 
 /**
  * 创建测试视频的 VideosDataMap

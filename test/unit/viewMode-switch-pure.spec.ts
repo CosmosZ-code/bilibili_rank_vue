@@ -3,26 +3,10 @@
  *
  * 验证时间戳比较逻辑：服务端缓存 timestamp 与本地记录比较，
  * 决定是否跳过数据刷新。
+ * 从 app/utils/cache.ts 导入。
  */
 import { describe, it, expect } from 'vitest'
-
-/**
- * shouldSkipRefresh 纯函数（与 index.vue 保持同步）
- *
- * @param serverTimestamp - 服务端缓存时间戳（来自 /api/xxx/timestamp 端点）
- * @param localTimestamp  - 本地记录的最近一次数据时间戳
- * @returns true 表示可跳过刷新（数据未变化），false 表示需要刷新
- */
-function shouldSkipRefresh(
-  serverTimestamp: number,
-  localTimestamp: number | undefined,
-): boolean {
-  return !!(
-    serverTimestamp &&
-    localTimestamp &&
-    serverTimestamp === localTimestamp
-  )
-}
+import { shouldSkipRefresh } from '../../app/utils/cache'
 
 describe('shouldSkipRefresh — 时间戳比较逻辑', () => {
   describe('无需刷新（返回 true）', () => {

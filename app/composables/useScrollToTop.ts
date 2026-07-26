@@ -1,4 +1,13 @@
 /**
+ * 纯函数：检查 scrollY 是否超过阈值
+ *
+ * 提取自 useScrollToTop，便于单元测试而不依赖 DOM。
+ */
+export function isPastScrollThreshold(scrollY: number, threshold: number): boolean {
+  return !isNaN(scrollY) && scrollY > threshold
+}
+
+/**
  * useScrollToTop — 返回顶部逻辑
  *
  * 管理返回顶部按钮的显示/隐藏 + 点击行为
@@ -12,7 +21,7 @@ export function useScrollToTop(scrollThreshold: number = 300) {
    */
   function onScroll() {
     if (typeof window !== 'undefined') {
-      showButton.value = window.scrollY > scrollThreshold
+      showButton.value = isPastScrollThreshold(window.scrollY, scrollThreshold)
     }
   }
 

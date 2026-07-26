@@ -79,6 +79,8 @@
 
 <script setup lang="ts">
 import type { RankingResponse, VideoWithBvid, LiveRankingResponse, LiveArea, ViewMode } from '../types'
+import { shouldSkipRefresh } from '../utils/cache'
+import { formatDate, DATE_LOCALE_OPTIONS } from '../utils/date'
 
 useHead({
   title: '当前在线 - 嗶哩嗶哩 - ( ゜- ゜)つロ 乾杯~ - bilibili.tv',
@@ -164,28 +166,10 @@ if (import.meta.client) {
   })
 }
 
-// ============================================================
-// 时间戳比较：决定是否跳过数据刷新
-// ============================================================
-function shouldSkipRefresh(serverTimestamp: number, localTimestamp: number | undefined): boolean {
-  return !!(serverTimestamp && localTimestamp && serverTimestamp === localTimestamp)
-}
-
 // 非 lazy：SSR 阶段获取缓存时间戳
 const { data: tsData } = await useAsyncData('ranking-timestamp', () =>
   $fetch('/api/ranking/timestamp'),
 )
-
-const DATE_LOCALE_OPTIONS: Intl.DateTimeFormatOptions = {
-  year: 'numeric', month: '2-digit', day: '2-digit',
-  hour: '2-digit', minute: '2-digit', second: '2-digit',
-  hour12: false,
-  timeZone: 'Asia/Shanghai',
-}
-
-function formatDate(ts: number | Date): string {
-  return new Date(ts).toLocaleString('zh-CN', DATE_LOCALE_OPTIONS)
-}
 
 const updateTime = ref(
   tsData.value?.timestamp

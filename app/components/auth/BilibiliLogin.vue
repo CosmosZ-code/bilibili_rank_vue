@@ -113,11 +113,9 @@ function onUserClick() {
 /** 触屏设备：点击下拉外部时关闭 */
 function onDocumentClick(e: MouseEvent) {
   if (!isTouch.value || !isMenuOpen.value) return
-  const wrapper = userMenuWrapperRef.value
-  const dropdown = userDropdownRef.value
-  const target = e.target as Node
-  if ((wrapper && wrapper.contains(target)) || (dropdown && dropdown.contains(target))) return
-  isMenuOpen.value = false
+  if (isClickOutside(e.target as Node, [userMenuWrapperRef.value, userDropdownRef.value])) {
+    isMenuOpen.value = false
+  }
 }
 
 onMounted(() => {
