@@ -133,4 +133,186 @@ describe('直播页面功能', async () => {
     expect(html).toContain('直播')
     expect(html).toContain('<!DOCTYPE html>')
   })
+
+  // ============================================================
+  // 时间戳 API 验证
+  // ============================================================
+  it('GET /api/ranking/timestamp 返回有效时间戳', async () => {
+    const data = await $fetch<{ timestamp: number }>('/api/ranking/timestamp')
+    expect(data).toHaveProperty('timestamp')
+    expect(typeof data.timestamp).toBe('number')
+  })
+
+  it('GET /api/live-rooms/timestamp 返回有效时间戳', async () => {
+    const data = await $fetch<{ timestamp: number }>('/api/live-rooms/timestamp')
+    expect(data).toHaveProperty('timestamp')
+    expect(typeof data.timestamp).toBe('number')
+  })
+
+  it('GET /api/live-rooms/timestamp?areaId=2 返回分区时间戳', async () => {
+    const data = await $fetch<{ timestamp: number }>('/api/live-rooms/timestamp?areaId=2')
+    expect(data).toHaveProperty('timestamp')
+    expect(typeof data.timestamp).toBe('number')
+  })
+
+  // ============================================================
+  // 视图快速切换回归
+  // ============================================================
+  it('视频 ↔ 直播连续切换不报错', { timeout: 20000 }, async () => {
+    const page = await createPage('/')
+    await page.waitForTimeout(1000)
+
+    // 切换到直播
+    const liveTrigger = await page.$('.live-trigger')
+    expect(liveTrigger).not.toBeNull()
+    if (liveTrigger) {
+      await liveTrigger.click()
+      await page.waitForTimeout(1500)
+    }
+    expect(page.url()).toContain('view=live')
+
+    // 切回视频
+    const tabs = await page.$$('.tab-btn')
+    let videoTab = null
+    for (const tab of tabs) {
+      const text = await tab.evaluate((el: Element) => el.textContent)
+      if (text?.includes('视频')) {
+        videoTab = tab
+        break
+      }
+    }
+    if (videoTab) {
+      await videoTab.click()
+      await page.waitForTimeout(1500)
+    }
+    expect(page.url()).not.toContain('view=live')
+
+    // 再次切换到直播
+    const liveTrigger2 = await page.$('.live-trigger')
+    if (liveTrigger2) {
+      await liveTrigger2.click()
+      await page.waitForTimeout(1500)
+    }
+    expect(page.url()).toContain('view=live')
+
+    await page.close()
+  })
+
+  it('直播分区反复切换正常（回归：第二次切回不失效）', { timeout: 20000 }, async () => {
+    const page = await createPage('/')
+
+    // ============================================================
+    // Mock API：让测试聚焦前端切换逻辑，消除网络等待
+    // ============================================================
+    await page.route('**/api/live-rooms**', (route) => {
+      const url = new URL(route.request().url())
+      const areaId = url.searchParams.get('areaId') || '0'
+      const prefix = areaId === '0' ? '全站' : areaId === '2' ? '网游' : `分区${areaId}`
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          items: Array.from({ length: 8 }, (_, i) => ({
+            roomid: 1000 + Number(areaId) * 100 + i,
+            title: `${prefix}直播间-${i + 1}`,
+            uname: `主播${i + 1}`,
+            uid: 100 + i,
+            online: 5000 - i * 500,
+            online_formatted: `${5000 - i * 500}`,
+            cover: '',
+            face: '',
+            area_v2_name: prefix,
+            parent_area_name: prefix,
+            parent_area_id: Number(areaId),
+            link: `https://live.bilibili.com/${1000 + Number(areaId) * 100 + i}`,
+          })),
+          total: 8,
+          page: 1,
+          pageSize: 30,
+          hasMore: false,
+          timestamp: Date.now(),
+        }),
+      })
+    })
+
+    await page.route('**/api/live-areas', (route) => {
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          areas: [
+            { id: 2, name: '网游' },
+            { id: 3, name: '手游' },
+          ],
+        }),
+      })
+    })
+
+    await page.route('**/api/live-rooms/timestamp**', (route) => {
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ timestamp: Date.now() }),
+      })
+    })
+
+    await page.route('**/api/ranking/timestamp', (route) => {
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ timestamp: Date.now() }),
+      })
+    })
+
+    // ============================================================
+    // 切换到直播模式
+    // ============================================================
+    const liveTrigger = await page.$('.live-trigger')
+    expect(liveTrigger).not.toBeNull()
+    await liveTrigger!.click()
+    await page.waitForSelector('.live-card', { timeout: 5000 })
+    let cards = await page.$$('.live-card')
+    expect(cards.length).toBeGreaterThan(0)
+
+    // ============================================================
+    // 辅助函数：hover 下拉 → 点击第 n 个分区项
+    // ============================================================
+    async function selectAreaNth(index: number) {
+      await page.$eval('.live-dropdown', (el) => {
+        el.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }))
+      })
+      await page.waitForTimeout(300)
+      await page.evaluate((idx) => {
+        const items = document.querySelectorAll('.dropdown-item')
+        if (items.length > idx) (items[idx] as HTMLElement).click()
+      }, index)
+      await page.waitForTimeout(500)
+      await page.waitForSelector('.live-card', { timeout: 5000 }).catch(() => {})
+    }
+
+    // 1. 全站 → 网游（dropdown 第 2 项，index=1）
+    await selectAreaNth(1)
+    cards = await page.$$('.live-card')
+    expect(cards.length).toBeGreaterThan(0)
+    // 验证切换到网游分区（卡片标题应含"网游"）
+    const title1 = await page.$eval('.live-card:first-child', (el) => el.textContent || '')
+    expect(title1).toContain('网游')
+
+    // 2. 网游 → 全站（dropdown 第 1 项，index=0）
+    await selectAreaNth(0)
+    cards = await page.$$('.live-card')
+    expect(cards.length).toBeGreaterThan(0)
+    // 验证已切回全站数据
+    const titleMid = await page.$eval('.live-card:first-child', (el) => el.textContent || '')
+    expect(titleMid).toContain('全站')
+
+    // 3. 全站 → 网游 —— 关键回归点：第二次切同一分区
+    await selectAreaNth(1)
+    cards = await page.$$('.live-card')
+    expect(cards.length).toBeGreaterThan(0)
+    const title2 = await page.$eval('.live-card:first-child', (el) => el.textContent || '')
+    expect(title2).toContain('网游') // 第二次切回应仍显示网游数据
+
+    await page.close()
+  })
 })

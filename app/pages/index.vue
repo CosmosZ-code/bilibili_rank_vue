@@ -164,6 +164,13 @@ if (import.meta.client) {
   })
 }
 
+// ============================================================
+// 时间戳比较：决定是否跳过数据刷新
+// ============================================================
+function shouldSkipRefresh(serverTimestamp: number, localTimestamp: number | undefined): boolean {
+  return !!(serverTimestamp && localTimestamp && serverTimestamp === localTimestamp)
+}
+
 // 非 lazy：SSR 阶段获取缓存时间戳
 const { data: tsData } = await useAsyncData('ranking-timestamp', () =>
   $fetch('/api/ranking/timestamp'),
@@ -185,7 +192,9 @@ const updateTime = ref(
     ? formatDate(tsData.value.timestamp)
     : '加载中...',
 )
-const lastDataTimestamp = ref(tsData.value?.timestamp ?? 0)
+const lastVideoTimestamp = ref(tsData.value?.timestamp ?? 0)
+const lastLiveTimestamp = ref(0)
+const lastAreaTimestamps = ref<Record<number, number>>({})
 
 // --- 视频分页 ---
 const PAGE_SIZE = 30
@@ -226,7 +235,7 @@ watch(page1Data, (data) => {
   currentPage.value = 1
   hasMoreFromServer.value = data.hasMore
   if (data.timestamp) {
-    lastDataTimestamp.value = data.timestamp
+    lastVideoTimestamp.value = data.timestamp
     updateTime.value = formatDate(data.timestamp)
   }
 })
@@ -291,6 +300,7 @@ function buildLiveQuery(page: number) {
 
 // 直播首页数据（延迟加载：仅客户端 + 直播模式才获取）
 const liveDataEnabled = ref(import.meta.client && viewMode.value === 'live')
+const areaDataCache = ref<Record<number, LiveRankingResponse>>({}) // 各分区原始数据缓存（无搜索词）
 
 const { data: livePage1Data, pending: liveIsLoading, error: liveFetchError } = useLazyAsyncData(
   'live-ranking',
@@ -298,7 +308,7 @@ const { data: livePage1Data, pending: liveIsLoading, error: liveFetchError } = u
     if (!liveDataEnabled.value) return undefined as any
     return $fetch<LiveRankingResponse>('/api/live-rooms', { query: buildLiveQuery(1) })
   },
-  { watch: [liveSearchTerm, areaId, liveDataEnabled], server: false },
+  { watch: [liveSearchTerm], server: false },
 )
 
 // SSR 阶段强制 loading 状态以显示骨架屏
@@ -317,7 +327,13 @@ watch(livePage1Data, (data) => {
   liveCurrentPage.value = 1
   liveHasMoreFromServer.value = data.hasMore
   if (data.timestamp) {
+    lastLiveTimestamp.value = data.timestamp
+    lastAreaTimestamps.value = { ...lastAreaTimestamps.value, [areaId.value]: data.timestamp }
     updateTime.value = formatDate(data.timestamp)
+    // 仅无搜索词时缓存（搜索结果是临时的，不适合跨分区复用）
+    if (!liveSearchTerm.value) {
+      areaDataCache.value = { ...areaDataCache.value, [areaId.value]: data }
+    }
   }
 })
 
@@ -342,21 +358,76 @@ const liveError = computed(() => {
   return null
 })
 
-// 切换视图时重置分页状态 + 首次切换到直播时触发数据加载
-watch(viewMode, (mode) => {
+// ============================================================
+// 共享刷新函数（供视图切换 + 回顶共用）
+// ============================================================
+async function refreshVideoData() {
+  try {
+    const { timestamp } = await $fetch('/api/ranking/timestamp')
+    if (shouldSkipRefresh(timestamp, lastVideoTimestamp.value)) return
+  } catch { /* 失败则照常刷新 */ }
+  refreshNuxtData('ranking')
+}
+
+async function refreshLiveData() {
+  // 有本地缓存且无搜索词 → 检查时间戳决定是否可复用
+  const cached = areaDataCache.value[areaId.value]
+  if (cached && !liveSearchTerm.value) {
+    try {
+      const { timestamp } = await $fetch('/api/live-rooms/timestamp', {
+        query: { areaId: areaId.value > 0 ? areaId.value : undefined },
+      })
+      const localTs = areaId.value > 0 ? lastAreaTimestamps.value[areaId.value] : lastLiveTimestamp.value
+      if (shouldSkipRefresh(timestamp, localTs)) {
+        // 数据未变化 → 从本地缓存恢复（零网络请求）
+        livePage1Data.value = cached as any
+        liveHasMoreFromServer.value = cached.hasMore
+        return
+      }
+    } catch { /* 失败则照常刷新 */ }
+  }
+  refreshNuxtData('live-ranking')
+}
+
+// 用于防止 viewMode + areaId 同步变化时的双重刷新
+let liveRefreshVersion = 0
+
+// 切换视图时：重置分页 + 按需刷新数据
+watch(viewMode, async (mode) => {
   if (mode === 'live') {
-    // 首次切换到直播：启用数据加载（watch 中的 liveDataEnabled 变化会触发 API）
+    // 首次切换到直播：启用数据加载（仅作门卫，不再触发自动拉取）
     liveDataEnabled.value = true
     // 重置直播分页
     liveExtraItems.value = []
     liveCurrentPage.value = 1
     liveHasMoreFromServer.value = true
+
+    const myVersion = ++liveRefreshVersion
+    await nextTick() // 等待同一事件周期内 areaId 的可能变化
+
+    // 若 areaId watcher 已抢占（版本号被递增），则跳过
+    if (myVersion !== liveRefreshVersion) return
+    await refreshLiveData()
   } else {
     // 重置视频分页
     extraItems.value = []
     currentPage.value = 1
     hasMoreFromServer.value = page1Data.value?.hasMore ?? true
+    await refreshVideoData()
   }
+})
+
+// 直播分区切换：重置分页 + 按需刷新
+watch(areaId, async (newAreaId, oldAreaId) => {
+  if (!liveDataEnabled.value) return
+  if (newAreaId === oldAreaId) return // 初始化或值未变
+
+  liveExtraItems.value = []
+  liveCurrentPage.value = 1
+  liveHasMoreFromServer.value = true
+
+  ++liveRefreshVersion // 取消 viewMode watcher 中的待定刷新
+  await refreshLiveData()
 })
 
 // ============================================================
@@ -425,20 +496,12 @@ function onBackToTop() {
       extraItems.value = []
       currentPage.value = 1
       hasMoreFromServer.value = page1Data.value?.hasMore ?? true
-      try {
-        const { timestamp } = await $fetch('/api/ranking/timestamp')
-        if (timestamp && lastDataTimestamp.value && timestamp === lastDataTimestamp.value) return
-      } catch { /* 失败则照常刷新 */ }
-      refreshNuxtData('ranking')
+      await refreshVideoData()
     } else {
       liveExtraItems.value = []
       liveCurrentPage.value = 1
       liveHasMoreFromServer.value = livePage1Data.value?.hasMore ?? true
-      try {
-        const { timestamp } = await $fetch('/api/live-rooms/timestamp')
-        if (timestamp && timestamp === livePage1Data.value?.timestamp) return
-      } catch { /* 失败则照常刷新 */ }
-      refreshNuxtData('live-ranking')
+      await refreshLiveData()
     }
   })
 }

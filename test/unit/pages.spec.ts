@@ -91,6 +91,54 @@ describe('index.vue 页面内容验证', () => {
     expect(content).toContain('hasMoreFromServer')
     expect(content).toContain('loadMore')
   })
+
+  it('视图切换包含时间戳校验逻辑', async () => {
+    const fs = await import('node:fs/promises')
+    const content = await fs.readFile(resolve(rootDir, 'app/pages/index.vue'), 'utf-8')
+
+    // 纯函数 + 时间戳追踪
+    expect(content).toContain('shouldSkipRefresh')
+    expect(content).toContain('lastVideoTimestamp')
+    expect(content).toContain('lastLiveTimestamp')
+    expect(content).toContain('lastAreaTimestamps')
+
+    // 共享刷新函数
+    expect(content).toContain('refreshVideoData')
+    expect(content).toContain('refreshLiveData')
+
+    // 版本号防重复刷新
+    expect(content).toContain('liveRefreshVersion')
+
+    // 视图切换中的 timestamp 端点调用
+    expect(content).toContain('/api/ranking/timestamp')
+    expect(content).toContain('/api/live-rooms/timestamp')
+
+    // refreshNuxtData 用于手动刷新
+    expect(content).toContain("refreshNuxtData('ranking')")
+    expect(content).toContain("refreshNuxtData('live-ranking')")
+
+    // watch(areaId) 独立处理分区切换
+    expect(content).toContain('watch(areaId')
+
+    // useLazyAsyncData watch 不再包含 areaId
+    const liveRankingWatch = content.match(
+      /useLazyAsyncData\(\s*'live-ranking'[\s\S]*?watch:\s*\[([^\]]*)\]/,
+    )
+    if (liveRankingWatch) {
+      // watch 数组中应只包含 liveSearchTerm
+      expect(liveRankingWatch[1]).toContain('liveSearchTerm')
+      expect(liveRankingWatch[1]).not.toContain('areaId')
+      expect(liveRankingWatch[1]).not.toContain('liveDataEnabled')
+    } else {
+      // 多行写法也检查
+      const watchContent = content.substring(
+        content.indexOf("useLazyAsyncData('live-ranking'"),
+        content.indexOf('live-ranking') + 500,
+      )
+      expect(watchContent).toContain('liveSearchTerm')
+      expect(watchContent).not.toContain("'areaId'")
+    }
+  })
 })
 
 describe('createError 使用 message 而非 statusMessage', () => {
