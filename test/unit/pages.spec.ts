@@ -223,3 +223,72 @@ describe('app.vue 内容验证', () => {
     expect(content).toContain('NuxtPage')
   })
 })
+
+describe('API 路由只读缓存（不触发实时拉取）', () => {
+  it('live-rooms.get.ts 包含 STALE 分支（else if (cached)）', async () => {
+    const fs = await import('node:fs/promises')
+    const content = await fs.readFile(resolve(rootDir, 'server/api/live-rooms.get.ts'), 'utf-8')
+    // 三分支：if (cached && fresh) → else if (cached) → else EMPTY
+    expect(content).toContain('else if (cached)')
+  })
+
+  it('live-rooms.get.ts 不调用 getLiveRoomsData（不应触发全量拉取）', async () => {
+    const fs = await import('node:fs/promises')
+    const content = await fs.readFile(resolve(rootDir, 'server/api/live-rooms.get.ts'), 'utf-8')
+    expect(content).not.toContain('getLiveRoomsData')
+  })
+
+  it('live-rooms.get.ts 不导入 mock 数据', async () => {
+    const fs = await import('node:fs/promises')
+    const content = await fs.readFile(resolve(rootDir, 'server/api/live-rooms.get.ts'), 'utf-8')
+    expect(content).not.toContain('MOCK_LIVE_ROOMS_MAP')
+  })
+
+  it('ranking.get.ts 包含 STALE 分支（else if (cached)）', async () => {
+    const fs = await import('node:fs/promises')
+    const content = await fs.readFile(resolve(rootDir, 'server/api/ranking.get.ts'), 'utf-8')
+    // 三分支：if (cached && fresh) → else if (cached) → else EMPTY
+    expect(content).toContain('else if (cached)')
+  })
+
+  it('ranking.get.ts 不调用 fetchAllRankings（不应触发全量拉取）', async () => {
+    const fs = await import('node:fs/promises')
+    const content = await fs.readFile(resolve(rootDir, 'server/api/ranking.get.ts'), 'utf-8')
+    expect(content).not.toContain('fetchAllRankings')
+  })
+
+  it('ranking.get.ts 不导入 mock 数据', async () => {
+    const fs = await import('node:fs/promises')
+    const content = await fs.readFile(resolve(rootDir, 'server/api/ranking.get.ts'), 'utf-8')
+    expect(content).not.toContain('MOCK_RANKING')
+  })
+
+  it('cache-warmer.ts 不导入 mock 数据', async () => {
+    const fs = await import('node:fs/promises')
+    const content = await fs.readFile(resolve(rootDir, 'server/plugins/cache-warmer.ts'), 'utf-8')
+    expect(content).not.toContain('MOCK_RANKING')
+    expect(content).not.toContain('MOCK_LIVE_ROOMS_MAP')
+  })
+})
+
+describe('前端空数据加载态 + 自动重试', () => {
+  it('包含 effectiveLoading 计算属性', async () => {
+    const fs = await import('node:fs/promises')
+    const content = await fs.readFile(resolve(rootDir, 'app/pages/index.vue'), 'utf-8')
+    expect(content).toContain('effectiveVideoLoading')
+    expect(content).toContain('effectiveLiveLoading')
+  })
+
+  it('包含 dataPending 空数据检测', async () => {
+    const fs = await import('node:fs/promises')
+    const content = await fs.readFile(resolve(rootDir, 'app/pages/index.vue'), 'utf-8')
+    expect(content).toContain('videoDataPending')
+    expect(content).toContain('liveDataPending')
+  })
+
+  it('包含 startEmptyRetry 自动重试', async () => {
+    const fs = await import('node:fs/promises')
+    const content = await fs.readFile(resolve(rootDir, 'app/pages/index.vue'), 'utf-8')
+    expect(content).toContain('startEmptyRetry')
+  })
+})

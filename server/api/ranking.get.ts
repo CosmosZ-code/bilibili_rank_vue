@@ -3,9 +3,9 @@
  *
  * 获取 B站实时在线观看人数排行榜（分页）。
  *
- * 数据由后台定时任务（cache-warmer）定期刷新到缓存，
- * 本路由读取缓存后执行排序→过滤→分页，用户几乎无感知延迟。
- * 仅在缓存完全丢失时（如首次启动且预热未完成）才实时拉取。
+ * 数据由 cache-warmer 后台定时刷新到缓存，本路由只读缓存。
+ * 缓存过期 → 返回旧数据（X-Cache: STALE），不阻塞。
+ * 缓存不存在 → 返回空数据（X-Cache: EMPTY），等待 cache warmer 首次预热。
  *
  * Query 参数：
  * - page: 页码（默认 1）
@@ -15,9 +15,7 @@
  * - purifyPercent: 净化阈值（可选，默认 0）
  */
 import type { CacheEntry, VideosDataMap, RankingResponse } from '../../app/types'
-import { fetchAllRankings } from '../utils/rankingFetcher'
 import { sortAndFilterRanking } from '../utils/rankingFetcher'
-import { MOCK_RANKING } from '../utils/mockData'
 import { COMBINED_CACHE_KEY, DEFAULT_PAGE_SIZE, DEFAULT_SORT_BY } from '../utils/rankingConstants'
 
 export default defineEventHandler(async (event) => {
@@ -39,33 +37,23 @@ export default defineEventHandler(async (event) => {
   if (cached && Date.now() - cached.timestamp < cacheTTL) {
     setResponseHeader(event, 'X-Cache', 'HIT')
     dataMap = cached.data
+  } else if (cached) {
+    // 缓存过期 → 返回旧数据，由 cache warmer 负责刷新（不阻塞）
+    setResponseHeader(event, 'X-Cache', 'STALE')
+    dataMap = cached.data
   } else {
-    // 2. 缓存未命中，实时拉取
-    const result = await fetchAllRankings()
-
-    if (result === null) {
-      // B站完全不可用，使用 mock 降级（也按分页返回）
-      setResponseHeader(event, 'X-Cache', 'MOCK')
-      setResponseHeader(event, 'X-Data-Source', 'mock')
-      const now = Date.now()
-      setResponseHeader(event, 'X-Data-Timestamp', String(now))
-      const mockItems = sortAndFilterRanking(MOCK_RANKING, { sortBy, search, purifyPercent })
-      const mockStart = (page - 1) * pageSize
-      const mockSlice = mockItems.slice(mockStart, mockStart + pageSize)
-      return {
-        items: mockSlice,
-        total: mockItems.length,
-        page,
-        pageSize,
-        hasMore: mockItems.length > page * pageSize,
-        timestamp: now,
-      } satisfies RankingResponse
-    }
-
-    const timestamp = Date.now()
-    await useStorage('cache').setItem(cacheKey, { data: result.data, timestamp })
-    setResponseHeader(event, 'X-Cache', 'MISS')
-    dataMap = result.data
+    // 缓存不存在 → 返回空数据，等待 cache warmer 首次预热
+    setResponseHeader(event, 'X-Cache', 'EMPTY')
+    const now = Date.now()
+    setResponseHeader(event, 'X-Data-Timestamp', String(now))
+    return {
+      items: [],
+      total: 0,
+      page,
+      pageSize,
+      hasMore: false,
+      timestamp: now,
+    } satisfies RankingResponse
   }
 
   // 3. 合并个性化数据（已登录用户）

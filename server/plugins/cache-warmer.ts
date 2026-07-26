@@ -15,7 +15,6 @@
 import { fetchAllRankings, retryFailedVideos, retryFailedMetadata } from '../utils/rankingFetcher'
 import { fetchAllLiveRooms, writeLiveRoomsCache, LIVE_CACHE_KEY } from '../utils/liveRoomFetcher'
 import { prefetchBiliTicket } from '../utils/bilibili'
-import { MOCK_RANKING, MOCK_LIVE_ROOMS_MAP } from '../utils/mockData'
 import { COMBINED_CACHE_KEY, VALID_RANKING_RIDS } from '../utils/rankingConstants'
 import {
   resolveRefreshInterval,
@@ -350,12 +349,8 @@ export default defineNitroPlugin((nitroApp) => {
     const cached = await useStorage('cache').getItem<CacheEntry<VideosDataMap>>(cacheKey)
 
     if (!cached || !cached.data || Object.keys(cached.data).length === 0) {
-      // 缓存为空，写入 mock 数据兜底
-      await useStorage('cache').setItem(cacheKey, {
-        data: MOCK_RANKING,
-        timestamp: Date.now(),
-      } satisfies CacheEntry<VideosDataMap>)
-      console.warn('[cache-warmer] 缓存为空，已写入 mock 降级数据')
+      // 缓存为空，等待下次重试（不写入 mock 数据）
+      console.warn('[cache-warmer] 缓存为空，等待重试')
     } else {
       // 保留旧缓存（可能是真实数据），不覆盖为 mock
       console.log(`[cache-warmer] 保留现有缓存（${Object.keys(cached.data).length} 条），不覆盖`)
@@ -482,11 +477,7 @@ export default defineNitroPlugin((nitroApp) => {
         const delay = calculateBackoffDelay(liveConsecutiveFailures - 1, normalInterval)
         const cached = await useStorage('cache').getItem<{ data: any[]; timestamp: number }>(LIVE_CACHE_KEY)
         if (!cached?.data || cached.data.length === 0) {
-          await useStorage('cache').setItem(LIVE_CACHE_KEY, {
-            data: Object.values(MOCK_LIVE_ROOMS_MAP),
-            timestamp: Date.now(),
-          })
-          console.warn('[cache-warmer:live] B站不可用且缓存为空，已写入 mock 降级')
+          console.warn('[cache-warmer:live] B站不可用且缓存为空，等待重试')
         } else {
           console.warn(`[cache-warmer:live] B站不可用，保留现有缓存（${cached.data.length} 条）`)
         }

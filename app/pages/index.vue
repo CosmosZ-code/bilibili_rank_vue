@@ -25,7 +25,7 @@
         <template v-if="viewMode === 'videos'">
           <VideoGrid
             :videos="displayedVideos"
-            :isLoading="videoLoading"
+            :isLoading="effectiveVideoLoading"
             :error="error"
           />
 
@@ -34,7 +34,7 @@
             <span v-if="isLoadingMore">加载中...</span>
             <span v-else>加载更多 ↓</span>
           </div>
-          <div v-else-if="!videoLoading && displayedVideos.length > 0" class="load-more load-more--end">
+          <div v-else-if="!effectiveVideoLoading && displayedVideos.length > 0" class="load-more load-more--end">
             已展示全部 {{ displayedVideos.length }} 条结果
           </div>
         </template>
@@ -43,7 +43,7 @@
         <template v-else>
           <LiveGrid
             :rooms="displayedLiveRooms"
-            :isLoading="liveLoading"
+            :isLoading="effectiveLiveLoading"
             :error="liveError"
           />
 
@@ -52,7 +52,7 @@
             <span v-if="liveIsLoadingMore">加载中...</span>
             <span v-else>加载更多 ↓</span>
           </div>
-          <div v-else-if="!liveLoading && displayedLiveRooms.length > 0" class="load-more load-more--end">
+          <div v-else-if="!effectiveLiveLoading && displayedLiveRooms.length > 0" class="load-more load-more--end">
             已展示全部 {{ displayedLiveRooms.length }} 条结果
           </div>
         </template>
@@ -314,6 +314,19 @@ const { data: livePage1Data, pending: liveIsLoading, error: liveFetchError } = u
 // SSR 阶段强制 loading 状态以显示骨架屏
 const liveLoading = computed(() => liveIsLoading.value || import.meta.server)
 
+// 数据预热中（缓存为空 + 无搜索词 → 应显示骨架屏而非"无结果"）
+const videoDataPending = computed(() =>
+  !import.meta.server && !isLoading.value &&
+  page1Data.value?.total === 0 && !videoSearchTerm.value,
+)
+const liveDataPending = computed(() =>
+  !import.meta.server && !liveIsLoading.value &&
+  livePage1Data.value?.total === 0 && !liveSearchTerm.value,
+)
+
+const effectiveVideoLoading = computed(() => videoLoading.value || videoDataPending.value)
+const effectiveLiveLoading = computed(() => liveLoading.value || liveDataPending.value)
+
 const displayedLiveRooms = computed(() => {
   const page1 = livePage1Data.value?.items || []
   return [...page1, ...liveExtraItems.value]
@@ -428,6 +441,31 @@ watch(areaId, async (newAreaId, oldAreaId) => {
 
   ++liveRefreshVersion // 取消 viewMode watcher 中的待定刷新
   await refreshLiveData()
+})
+
+// ============================================================
+// 数据为空时自动重试（cache warmer 尚未完成首次预热）
+// ============================================================
+function startEmptyRetry(key: string, checkPending: () => boolean) {
+  if (!import.meta.client) return
+  let delay = 2000
+  function schedule() {
+    if (!checkPending()) return // 数据已到，停止
+    setTimeout(() => {
+      refreshNuxtData(key)
+      delay = Math.min(delay * 2, 15000) // 退避：2s→4s→8s→15s
+      schedule()
+    }, delay)
+  }
+  schedule()
+}
+
+watch(videoDataPending, (pending) => {
+  if (pending) startEmptyRetry('ranking', () => videoDataPending.value)
+})
+
+watch(liveDataPending, (pending) => {
+  if (pending) startEmptyRetry('live-ranking', () => liveDataPending.value)
 })
 
 // ============================================================

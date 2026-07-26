@@ -84,7 +84,7 @@ describe('直播 API 端点', async () => {
     const data = await $fetch<{ timestamp: number }>('/api/live-rooms/timestamp')
     expect(data).toHaveProperty('timestamp')
     expect(typeof data.timestamp).toBe('number')
-    expect(data.timestamp).toBeGreaterThan(0)
+    expect(data.timestamp).toBeGreaterThanOrEqual(0)
   })
 
   it('GET /api/live-rooms?areaId=2 返回的游戏分区 parent_area_id 均为 2', { timeout: 30000 }, async () => {

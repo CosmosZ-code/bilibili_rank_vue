@@ -3,8 +3,9 @@
  *
  * 获取 B站直播间排行榜（按在线热度排序，分页）。
  *
- * 数据由 liveRoomFetcher 从 B站公开 API 拉取并缓存，
- * 本路由读取缓存后执行排序→过滤→分页。
+ * 数据由 cache-warmer 后台定时刷新到缓存，本路由只读缓存。
+ * 缓存过期 → 返回旧数据（X-Cache: STALE），不阻塞。
+ * 缓存不存在 → 返回空数据（X-Cache: EMPTY），等待 cache warmer 首次预热。
  *
  * Query 参数：
  * - page: 页码（默认 1）
@@ -13,8 +14,7 @@
  * - areaId: 一级分区 ID（可选，> 0 时过滤）
  */
 import type { CacheEntry, LiveRoomInfo, LiveRankingResponse } from '../../app/types'
-import { LIVE_CACHE_KEY, sortAndFilterLiveRooms, getLiveRoomsData, liveAreaCacheKey } from '../utils/liveRoomFetcher'
-import { MOCK_LIVE_ROOMS_MAP } from '../utils/mockData'
+import { sortAndFilterLiveRooms, liveAreaCacheKey } from '../utils/liveRoomFetcher'
 import { DEFAULT_LIVE_PAGE_SIZE } from '../utils/liveRoomFetcher'
 
 export default defineEventHandler(async (event) => {
@@ -37,33 +37,24 @@ export default defineEventHandler(async (event) => {
     setResponseHeader(event, 'X-Cache', 'HIT')
     roomList = cached.data
     timestamp = cached.timestamp
+  } else if (cached) {
+    // 缓存过期 → 返回旧数据，由 cache warmer 负责刷新（不阻塞）
+    setResponseHeader(event, 'X-Cache', 'STALE')
+    roomList = cached.data
+    timestamp = cached.timestamp
   } else {
-    // 2. 缓存未命中，实时拉取（areaId 传给 getLiveRoomsData 决定读/写哪个缓存）
-    const result = await getLiveRoomsData(areaId)
-
-    if (result === null) {
-      // B站完全不可用，使用 mock 降级
-      setResponseHeader(event, 'X-Cache', 'MOCK')
-      setResponseHeader(event, 'X-Data-Source', 'mock')
-      const now = Date.now()
-      setResponseHeader(event, 'X-Data-Timestamp', String(now))
-      const mockRooms = Object.values(MOCK_LIVE_ROOMS_MAP)
-      const filtered = sortAndFilterLiveRooms(mockRooms, { search, areaId })
-      const start = (page - 1) * pageSize
-      const slice = filtered.slice(start, start + pageSize)
-      return {
-        items: slice,
-        total: filtered.length,
-        page,
-        pageSize,
-        hasMore: filtered.length > page * pageSize,
-        timestamp: now,
-      } satisfies LiveRankingResponse
-    }
-
-    setResponseHeader(event, 'X-Cache', 'MISS')
-    roomList = result.data
-    timestamp = result.timestamp
+    // 缓存不存在 → 返回空数据，等待 cache warmer 首次预热
+    setResponseHeader(event, 'X-Cache', 'EMPTY')
+    const now = Date.now()
+    setResponseHeader(event, 'X-Data-Timestamp', String(now))
+    return {
+      items: [],
+      total: 0,
+      page,
+      pageSize,
+      hasMore: false,
+      timestamp: now,
+    } satisfies LiveRankingResponse
   }
 
   // 3. 排序 + 过滤
