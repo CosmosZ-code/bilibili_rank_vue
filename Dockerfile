@@ -47,8 +47,8 @@ RUN addgroup -g 1001 -S nodejs && \
 # Copy only the production output from build stage
 COPY --from=build --chown=nuxt:nodejs /app/.output /app/.output
 
-# Create data directory (fallback for non-volume scenarios)
-RUN mkdir -p /app/data && chown nuxt:nodejs /app/data
+# Create data directories (DB + Banner volume mount point)
+RUN mkdir -p /app/data/banners && chown -R nuxt:nodejs /app/data
 
 # Entrypoint script — runs as root, fixes volume permissions, then drops to nuxt
 COPY docker-entrypoint.sh /docker-entrypoint.sh

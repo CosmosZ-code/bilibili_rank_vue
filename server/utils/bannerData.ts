@@ -1,9 +1,9 @@
 /**
  * Banner 数据加载与备用数据集
  *
- * - 自动扫描 public/assets/ 下所有 YYYY-MM-DD 格式目录
+ * - 扫描多个 assets 目录（构建产物 + 运行时 Volume）
  * - 取最新 5 套，不足时用 CDN 备用数据补齐
- * - 7 天内存缓存，配合 refresh-banners 任务每周刷新
+ * - 纯函数，不缓存 — 缓存由 banner-warmer 插件管理
  */
 import type { BannerDataSet, BannerLayerData } from '../../app/types'
 import { readdirSync, readFileSync, existsSync } from 'node:fs'
@@ -259,22 +259,11 @@ export function getFallbackBanners(): BannerDataSet[] {
 }
 
 // ============================================================
-// 缓存（模块级，进程存活期间有效）
-// ============================================================
-
-const CACHE_TTL = 7 * 24 * 60 * 60 * 1000 // 7 天
-let cache: { data: BannerDataSet[]; timestamp: number } | null = null
-
-export function clearBannerCache(): void {
-  cache = null
-}
-
-// ============================================================
 // 目录扫描 + 加载
 // ============================================================
 
 /** 判断是否为日期目录（YYYY-MM-DD） */
-function isDateDir(name: string): boolean {
+export function isDateDir(name: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(name)
 }
 
@@ -299,17 +288,9 @@ function fixBannerSrc(src: string, dir: string): string {
 }
 
 /**
- * 动态扫描 public/assets/ 目录，返回最新 5 套 Banner
+ * 规范化图层数据
  *
- * - 按日期降序排列，取前 5 个
- * - 并行 fetch data.json，失败静默跳过
- * - 不足 5 套时用 CDN 备用数据补齐
- * - 结果缓存 7 天
- */
-/**
- * 规范化 grab.js 抓取的图层数据
- *
- * grab.js 输出的 data.json 中 opacity 等字段可能是字符串，
+ * data.json 中 opacity 等字段可能是字符串，
  * 这里统一转为 number，确保运行时类型一致。
  */
 function normalizeLayer(layer: Record<string, unknown>): BannerLayerData {
@@ -335,59 +316,60 @@ function normalizeLayer(layer: Record<string, unknown>): BannerLayerData {
   return normalized as unknown as BannerLayerData
 }
 
-export async function loadAllBanners(): Promise<BannerDataSet[]> {
-  // 检查缓存
-  if (cache && Date.now() - cache.timestamp < CACHE_TTL) {
-    return cache.data
-  }
-
+/**
+ * 扫描单个 assets 目录，返回最新 5 套 Banner（纯函数，不缓存）
+ *
+ * - 优先使用传入的 assetsDir，不存在时回退到内置目录
+ * - 按日期降序排列，取前 5 个
+ * - 不足 5 套时用 CDN 备用数据补齐
+ */
+export async function loadAllBanners(assetsDir?: string): Promise<BannerDataSet[]> {
   const MAX_BANNERS = 5
 
-  try {
-    // Nitro 环境下 public/ 直接映射到文件系统
-    const assetsDir = join(process.cwd(), 'public', 'assets')
-    let dateDirs: string[] = []
+  // 确定扫描目录
+  let scanDir = assetsDir
+  if (!scanDir || !existsSync(scanDir)) {
+    const prodDir = join(process.cwd(), '.output', 'public', 'assets')
+    const devDir = join(process.cwd(), 'public', 'assets')
+    scanDir = existsSync(prodDir) ? prodDir : devDir
+  }
 
-    try {
-      dateDirs = readdirSync(assetsDir, { withFileTypes: true })
-        .filter((e) => e.isDirectory() && isDateDir(e.name))
-        .map((e) => e.name)
-        .sort((a, b) => b.localeCompare(a)) // 降序：最新在前
-        .slice(0, MAX_BANNERS)
-    } catch {
-      // public/assets/ 不存在，使用 fallback
-    }
-
-	    // 同步读取 data.json（比 fetch 更可靠，不依赖 HTTP）
-	    const banners: BannerDataSet[] = []
-	    for (const dir of dateDirs) {
-	      const jsonPath = join(assetsDir, dir, 'data.json')
-	      if (!existsSync(jsonPath)) continue
-	      try {
-		        const raw = readFileSync(jsonPath, 'utf-8')
-		        const layers = JSON.parse(raw)
-		        // 规范化 + 修正 src 路径
-		        const data = layers.map((layer: Record<string, unknown>) => {
-		          const normalized = normalizeLayer(layer)
-		          return { ...normalized, src: fixBannerSrc(normalized.src, dir) }
-		        })
-	        banners.push({ name: dir, data })
-	      } catch {
-	        // JSON 解析失败，跳过
-	      }
-	    }
-
-    // 不足 5 套时 fallback 补齐
-    if (banners.length < MAX_BANNERS) {
-      const fallback = getFallbackBanners()
-      banners.push(...fallback.slice(0, MAX_BANNERS - banners.length))
-    }
-
-    // 写入缓存
-    cache = { data: banners, timestamp: Date.now() }
-    return banners
-  } catch {
-    // 完全失败，返回 fallback
+  if (!existsSync(scanDir)) {
     return getFallbackBanners()
   }
+
+  let dateDirs: string[] = []
+  try {
+    dateDirs = readdirSync(scanDir, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && isDateDir(e.name))
+      .map((e) => e.name)
+      .sort((a, b) => b.localeCompare(a))
+      .slice(0, MAX_BANNERS)
+  } catch {
+    return getFallbackBanners()
+  }
+
+  const banners: BannerDataSet[] = []
+  for (const dir of dateDirs) {
+    const jsonPath = join(scanDir, dir, 'data.json')
+    if (!existsSync(jsonPath)) continue
+    try {
+      const raw = readFileSync(jsonPath, 'utf-8')
+      const layers = JSON.parse(raw)
+      const data = layers.map((layer: Record<string, unknown>) => {
+        const normalized = normalizeLayer(layer)
+        return { ...normalized, src: fixBannerSrc(normalized.src, dir) }
+      })
+      banners.push({ name: dir, data })
+    } catch {
+      // JSON 解析失败，跳过
+    }
+  }
+
+  if (banners.length < MAX_BANNERS) {
+    const fallback = getFallbackBanners()
+    banners.push(...fallback.slice(0, MAX_BANNERS - banners.length))
+  }
+
+  return banners
 }
