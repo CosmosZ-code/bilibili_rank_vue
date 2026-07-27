@@ -177,4 +177,24 @@ describe('组件关键内容验证', () => {
     expect(content).toContain('shimmer')
     expect(content).toContain('keyframes')
   })
+
+  it('BannerContainer 接收 initialBanners prop 并传给 useBanner', async () => {
+    const fs = await import('node:fs/promises')
+    const content = await fs.readFile(resolve(componentsDir, 'banner/BannerContainer.vue'), 'utf-8')
+    expect(content).toContain('initialBanners')
+    expect(content).toContain('useBanner(props.initialBanners)')
+  })
+
+  it('useBanner 不再导入 BANNER_FALLBACK', async () => {
+    const fs = await import('node:fs/promises')
+    const content = await fs.readFile(resolve(rootDir, 'app/composables/useBanner.ts'), 'utf-8')
+    expect(content).not.toContain('BANNER_FALLBACK')
+  })
+
+  it('index.vue 包含 SSR 预取的 useFetch', async () => {
+    const fs = await import('node:fs/promises')
+    const content = await fs.readFile(resolve(rootDir, 'app/pages/index.vue'), 'utf-8')
+    expect(content).toContain("useFetch<BannerDataSet[]>('/api/banners'")
+    expect(content).toContain(':initial-banners="bannerData"')
+  })
 })

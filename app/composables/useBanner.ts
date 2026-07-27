@@ -2,7 +2,6 @@
  * useBanner — Banner 视差引擎（纯函数 + 状态管理）
  */
 import type { BannerDataSet, BannerLayerData } from '../types'
-import { BANNER_FALLBACK } from '../data/bannerFallback'
 
 // ===== 纯函数 =====
 
@@ -87,8 +86,8 @@ export function calcLayerTransform(
 
 // ===== Composable =====
 
-export function useBanner() {
-  const banners = ref<BannerDataSet[]>(BANNER_FALLBACK)
+export function useBanner(initialBanners?: BannerDataSet[]) {
+  const banners = ref<BannerDataSet[]>(initialBanners ?? [])
   const currentIndex = ref(0)
   const compensate = ref(1)
   const moveX = ref(0)
@@ -122,27 +121,9 @@ export function useBanner() {
     return layers.map((l) => calcLayerTransform(l, mx, ww, progress))
   }
 
-  // 异步加载更多 banner 数据
-  async function loadMoreBanners() {
-    try {
-      const data = await $fetch<BannerDataSet[]>('/api/banners')
-      if (data?.length > 0) {
-        // 服务端数据在前，fallback 兜底在后
-        banners.value = [...data, ...BANNER_FALLBACK]
-        // 从全部 banner 中随机选择
-        randomizeIndex()
-      }
-    } catch { /* keep current banners */ }
-  }
-
   if (typeof window !== 'undefined') {
     updateCompensate()
-    // 初始随机
     randomizeIndex()
-    // 首次加载
-    loadMoreBanners()
-    // 每 6 小时轮询刷新
-    setInterval(loadMoreBanners, 6 * 60 * 60 * 1000)
   }
 
   return { banners, currentIndex, currentBanner, layers, compensate, moveX, initX, updateCompensate, getLayerStyles }

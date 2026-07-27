@@ -28,7 +28,11 @@
 </template>
 
 <script setup lang="ts">
-const { layers, compensate, moveX, initX, getLayerStyles, updateCompensate } = useBanner()
+import type { BannerDataSet } from '../../app/types'
+
+const props = defineProps<{ initialBanners?: BannerDataSet[] }>()
+
+const { layers, compensate, moveX, initX, getLayerStyles, updateCompensate } = useBanner(props.initialBanners)
 
 const layerStyles = ref<{ transform: string; opacity?: number }[]>([])
 let frameId = 0

@@ -1,7 +1,7 @@
 <template>
   <div>
     <ClientOnly>
-      <BannerContainer />
+      <BannerContainer :initial-banners="bannerData" />
       <template #fallback>
         <div style="min-height: 155px; height: 10vw; max-height: 240px; background: var(--b-blue);"></div>
       </template>
@@ -78,7 +78,7 @@
 </template>
 
 <script setup lang="ts">
-import type { RankingResponse, VideoWithBvid, LiveRankingResponse, LiveArea, ViewMode } from '../types'
+import type { RankingResponse, VideoWithBvid, LiveRankingResponse, LiveArea, ViewMode, BannerDataSet } from '../types'
 import { shouldSkipRefresh } from '../utils/cache'
 import { formatDate, DATE_LOCALE_OPTIONS } from '../utils/date'
 
@@ -91,6 +91,9 @@ useHead({
     { name: 'referrer', content: 'no-referrer' },
   ],
 })
+
+// Banner 数据 SSR 预取（banner-warmer 已预热缓存，内存读取 <1ms）
+const { data: bannerData } = useFetch<BannerDataSet[]>('/api/banners', { default: () => [] })
 
 // ============================================================
 // 视图模式：从 URL query 读取
