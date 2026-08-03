@@ -349,6 +349,10 @@ export function filterStaleOnlineTargets(
  * 逐 rid 请求，遇风控（返回空）停止并记录 failedRid。
  * 列表数据自带 stat（播放量/弹幕量）和 cid，供弹幕量预筛选与在线人数拉取使用。
  *
+ * 条数约定：每个 rid 的列表上限恒为 100 条（B站接口约束，与 rid 取值无关，
+ * 见 getBilibiliRanking 注释）。热门 2 页 = 100 条。
+ * 全站 rid=0 与各分区高度重叠，合并去重后全局候选远小于 16×100。
+ *
  * @param options.singleRid - 单 rid 模式（独立重试时使用）
  * @param options.skipRanking - 跳过排行拉取
  * @param options.skipPopular - 跳过热门拉取
@@ -371,10 +375,10 @@ export async function fetchAllRankingLists(options?: {
   const perRid: Record<string, RankingVideo[]> = {}
   let popular: RankingVideo[] = []
 
-  // 1. 热门（先行，为 ranking "预热"连接；4 页 = 200 条）
+  // 1. 热门（先行，为 ranking "预热"连接；2 页 = 100 条，页数过多会提高突发风控概率）
   if (!options?.skipPopular) {
     popular = await withTimeout(
-      getBilibiliPopular(4).catch(() => []),
+      getBilibiliPopular(2).catch(() => []),
       apiTimeout,
       [],
     )

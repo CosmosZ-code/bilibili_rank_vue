@@ -12,8 +12,7 @@
     "test:unit": "vitest --project unit",
     "test:nuxt": "vitest --project nuxt",
     "test:e2e": "vitest --project e2e",
-    "test:run": "vitest --run",
-    "test:run": "单次运行所有测试"
+    "test:run": "vitest --run"
   },
   "dependencies": {
     "@types/sql.js": "^1.4.11",

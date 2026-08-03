@@ -24,7 +24,7 @@ import {
   type PartitionCacheEntry,
 } from '../utils/rankingFetcher'
 import { fetchAllLiveRooms, writeLiveRoomsCache, LIVE_CACHE_KEY } from '../utils/liveRoomFetcher'
-import { prefetchBiliTicket, type RankingVideo } from '../utils/bilibili'
+import { prefetchBiliTicket, prefetchBuvids, type RankingVideo } from '../utils/bilibili'
 import {
   COMBINED_CACHE_KEY,
   POPULAR_CACHE_KEY,
@@ -52,6 +52,7 @@ export default defineNitroPlugin((nitroApp) => {
   const RANKING_TOP_TOTAL = 200 // 排行弹幕量 TOP 总数（分区均衡分配）
   // 分区均衡 TOP：仅非全站分区参与（全站与各分区高度重叠，避免浪费名额）
   const NON_TOP_RIDS = VALID_RANKING_RIDS.filter((r) => r !== '0')
+  // 每分区列表上限 100 条（B站接口约束，与 rid 无关），topPerRid = 200/15 = 13 条/分区
   const topPerRid = Math.floor(RANKING_TOP_TOTAL / NON_TOP_RIDS.length) // 200/15 = 13 条/分区
   // 轮转索引（模块级状态，逐轮递增；轮转批次由「500 - 基础目标需请求数」动态补齐）
   let onlineRotationIndex = 0
@@ -811,8 +812,13 @@ export default defineNitroPlugin((nitroApp) => {
     }
   }
 
-  // 启动时预取 bili_ticket（避免首次 API 请求因 GenWebTicket 与 B站 API 间隔过近触发风控）
+  // 启动时预取 buvid 设备指纹 + bili_ticket（避免首次 API 请求与
+  // spi / GenWebTicket 调用背靠背触发风控）
   setImmediate(async () => {
+    console.log(`[cache-warmer] 预取 buvid 设备指纹...`)
+    await prefetchBuvids()
+    // 与 ticket 请求错开，避免背靠背
+    await new Promise((r) => setTimeout(r, 500))
     console.log(`[cache-warmer] 预取 bili_ticket...`)
     await prefetchBiliTicket()
     // 预取完成后稍等 1 秒，避免 GenWebTicket 与实际 API 请求背靠背触发风控

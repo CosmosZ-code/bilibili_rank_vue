@@ -15,6 +15,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const mock$Fetch = vi.fn()
 const mockFetch = vi.fn()
 
+/** spi 接口 mock — buvid3/buvid4 设备指纹（bilibiliRequest 每次都会附加） */
+const spiMock = {
+  code: 0, message: '0',
+  data: { b_3: 'B3-TEST-001', b_4: 'B4-TEST-001' },
+}
+
 function setupGlobals() {
   ;(globalThis as any).$fetch = mock$Fetch
   ;(globalThis as any).createError = (opts: { statusCode: number; message: string; statusMessage?: string }) => {
@@ -202,6 +208,7 @@ describe('getNavUserInfo', () => {
 
   it('成功返回用户信息', async () => {
     mock$Fetch.mockResolvedValueOnce({ code: -1, message: '', data: {} }) // fetchBiliTicket（测试环境不真实请求）
+    mock$Fetch.mockResolvedValueOnce(spiMock) // fetchBuvids
     mock$Fetch.mockResolvedValueOnce(wbiMock) // fetchWbiKeys
     mock$Fetch.mockResolvedValueOnce({
       code: 0, message: '0',
@@ -216,6 +223,7 @@ describe('getNavUserInfo', () => {
 
   it('未登录时返回 isLogin=false（nav 接口 code=-101）', async () => {
     mock$Fetch.mockResolvedValueOnce({ code: -1, message: '', data: {} }) // fetchBiliTicket
+    mock$Fetch.mockResolvedValueOnce(spiMock) // fetchBuvids
     mock$Fetch.mockResolvedValueOnce(wbiMock)
     mock$Fetch.mockResolvedValueOnce({ code: -101, message: '账号未登录', data: {} })
 
@@ -227,6 +235,7 @@ describe('getNavUserInfo', () => {
 
   it('网络错误时抛出异常', async () => {
     mock$Fetch.mockResolvedValueOnce({ code: -1, message: '', data: {} }) // fetchBiliTicket
+    mock$Fetch.mockResolvedValueOnce(spiMock) // fetchBuvids
     mock$Fetch.mockResolvedValueOnce(wbiMock)
     mock$Fetch.mockRejectedValueOnce(new Error('Network error'))
 
@@ -263,30 +272,32 @@ describe('bilibiliRequest — bili_ticket 集成', () => {
   }
 
   it('成功获取 bili_ticket 并附加到请求 Cookie', async () => {
-    // ticketMock 含 nav → WBI keys 同步缓存 → 仅 2 次 $fetch
+    // ticketMock 含 nav → WBI keys 同步缓存 → 仅 3 次 $fetch（ticket + buvid + API）
     mock$Fetch.mockResolvedValueOnce(ticketMock) // fetchBiliTicket
+    mock$Fetch.mockResolvedValueOnce(spiMock) // fetchBuvids
     mock$Fetch.mockResolvedValueOnce({ code: 0, message: '0', data: { test: 'ok' } }) // API
 
     await mod.bilibiliRequest('/test')
 
-    // 第 2 次调用是实际 API 请求（索引 1）
+    // 第 3 次调用是实际 API 请求（索引 2）
     const calls = mock$Fetch.mock.calls as [string, RequestInit][]
-    expect(calls.length).toBe(2)
-    const apiCall = calls[1]
+    expect(calls.length).toBe(3)
+    const apiCall = calls[2]
     const cookieHeader = (apiCall[1].headers as Record<string, string>)['Cookie']
     expect(cookieHeader).toContain('bili_ticket=')
   })
 
   it('skipTicket=true 时不附加 bili_ticket', async () => {
+    mock$Fetch.mockResolvedValueOnce(spiMock) // fetchBuvids（skipTicket 不影响 buvid）
     mock$Fetch.mockResolvedValueOnce(wbiMock) // fetchWbiKeys
     mock$Fetch.mockResolvedValueOnce({ code: 0, message: '0', data: {} }) // API
 
     await mod.bilibiliRequest('/test', { skipTicket: true })
 
-    // 只有 2 次 $fetch 调用（跳过 ticket）
-    expect(mock$Fetch).toHaveBeenCalledTimes(2)
+    // 只有 3 次 $fetch 调用（跳过 ticket）
+    expect(mock$Fetch).toHaveBeenCalledTimes(3)
 
-    const apiCall = (mock$Fetch.mock.calls as [string, RequestInit][])[1]
+    const apiCall = (mock$Fetch.mock.calls as [string, RequestInit][])[2]
     const cookie = (apiCall[1].headers as Record<string, string>)['Cookie'] || ''
     expect(cookie).not.toContain('bili_ticket')
   })
@@ -294,6 +305,7 @@ describe('bilibiliRequest — bili_ticket 集成', () => {
   it('GenWebTicket 失败时静默降级，不影响业务请求', async () => {
     // GenWebTicket 失败 → ticket='' → WBI 未缓存 → 需单独请求 WBI
     mock$Fetch.mockResolvedValueOnce({ code: -1, message: 'error', data: {} }) // fetchBiliTicket
+    mock$Fetch.mockResolvedValueOnce(spiMock) // fetchBuvids
     mock$Fetch.mockResolvedValueOnce(wbiMock) // fetchWbiKeys
     mock$Fetch.mockResolvedValueOnce({ code: 0, message: '0', data: { ok: true } }) // API
 
@@ -301,11 +313,12 @@ describe('bilibiliRequest — bili_ticket 集成', () => {
 
     expect(r.code).toBe(0)
     expect(r.data).toEqual({ ok: true })
-    expect(mock$Fetch).toHaveBeenCalledTimes(3) // ticket + WBI + API
+    expect(mock$Fetch).toHaveBeenCalledTimes(4) // ticket + buvid + WBI + API
   })
 
   it('GenWebTicket 网络异常时静默降级', async () => {
     mock$Fetch.mockRejectedValueOnce(new Error('timeout')) // GenWebTicket 失败
+    mock$Fetch.mockResolvedValueOnce(spiMock) // fetchBuvids
     mock$Fetch.mockResolvedValueOnce(wbiMock) // fetchWbiKeys
     mock$Fetch.mockResolvedValueOnce({ code: 0, message: '0', data: { ok: true } }) // API
 
@@ -318,12 +331,13 @@ describe('bilibiliRequest — bili_ticket 集成', () => {
   it('ticket 缓存命中时不重复请求 GenWebTicket', async () => {
     // 第一次：ticketMock 含 nav → WBI 也被缓存
     mock$Fetch.mockResolvedValueOnce(ticketMock) // fetchBiliTicket
+    mock$Fetch.mockResolvedValueOnce(spiMock) // fetchBuvids
     mock$Fetch.mockResolvedValueOnce({ code: 0, message: '0', data: { first: true } }) // API
 
     await mod.bilibiliRequest('/test')
-    expect(mock$Fetch).toHaveBeenCalledTimes(2)
+    expect(mock$Fetch).toHaveBeenCalledTimes(3)
 
-    // 第二次：ticket 和 WBI 都命中缓存 → 仅 1 次 $fetch（API）
+    // 第二次：ticket、buvid、WBI 都命中缓存 → 仅 1 次 $fetch（API）
     mock$Fetch.mockClear()
     mock$Fetch.mockResolvedValueOnce({ code: 0, message: '0', data: { second: true } }) // API
 
@@ -333,14 +347,40 @@ describe('bilibiliRequest — bili_ticket 集成', () => {
 
   it('已有的 Cookie 与 bili_ticket 正确合并', async () => {
     mock$Fetch.mockResolvedValueOnce(ticketMock) // fetchBiliTicket（含 nav → WBI 缓存）
+    mock$Fetch.mockResolvedValueOnce(spiMock) // fetchBuvids
     mock$Fetch.mockResolvedValueOnce({ code: 0, message: '0', data: {} }) // API
 
     await mod.bilibiliRequest('/test', { cookie: 'SESSDATA=abc; bili_jct=xyz' })
 
-    const apiCall = (mock$Fetch.mock.calls as [string, RequestInit][])[1]
+    const apiCall = (mock$Fetch.mock.calls as [string, RequestInit][])[2]
     const cookie = (apiCall[1].headers as Record<string, string>)['Cookie']
     expect(cookie).toContain('SESSDATA=abc')
     expect(cookie).toContain('bili_ticket=')
+  })
+
+  it('buvid3/buvid4/b_nut 附加到请求 Cookie（设备指纹）', async () => {
+    mock$Fetch.mockResolvedValueOnce(ticketMock) // fetchBiliTicket
+    mock$Fetch.mockResolvedValueOnce(spiMock) // fetchBuvids
+    mock$Fetch.mockResolvedValueOnce({ code: 0, message: '0', data: {} }) // API
+
+    await mod.bilibiliRequest('/test')
+
+    const apiCall = (mock$Fetch.mock.calls as [string, RequestInit][])[2]
+    const cookie = (apiCall[1].headers as Record<string, string>)['Cookie']
+    expect(cookie).toContain('buvid3=B3-TEST-001')
+    expect(cookie).toContain('buvid4=B4-TEST-001')
+    expect(cookie).toMatch(/b_nut=\d+/)
+  })
+
+  it('spi 失败时静默降级，不影响业务请求', async () => {
+    mock$Fetch.mockResolvedValueOnce(ticketMock) // fetchBiliTicket
+    mock$Fetch.mockResolvedValueOnce({ code: -1, message: '', data: {} }) // fetchBuvids 失败
+    mock$Fetch.mockResolvedValueOnce({ code: 0, message: '0', data: { ok: true } }) // API
+
+    const r = await mod.bilibiliRequest('/test')
+
+    expect(r.code).toBe(0)
+    expect(r.data).toEqual({ ok: true })
   })
 })
 
@@ -372,6 +412,7 @@ describe('bilibiliRequest — -352 风控日志', () => {
 
   it('-352 带 v_voucher 时输出包含 v_voucher 的日志', async () => {
     mock$Fetch.mockResolvedValueOnce({ code: -1, message: '', data: {} }) // fetchBiliTicket
+    mock$Fetch.mockResolvedValueOnce(spiMock) // fetchBuvids
     mock$Fetch.mockResolvedValueOnce(wbiMock) // fetchWbiKeys
     mock$Fetch.mockResolvedValueOnce({
       code: -352, message: '风控校验失败',
@@ -388,6 +429,7 @@ describe('bilibiliRequest — -352 风控日志', () => {
 
   it('-352 无 v_voucher 时输出检查提示日志', async () => {
     mock$Fetch.mockResolvedValueOnce({ code: -1, message: '', data: {} }) // fetchBiliTicket
+    mock$Fetch.mockResolvedValueOnce(spiMock) // fetchBuvids
     mock$Fetch.mockResolvedValueOnce(wbiMock) // fetchWbiKeys
     mock$Fetch.mockResolvedValueOnce({ code: -352, message: '风控校验失败', data: {} })
 
@@ -401,6 +443,7 @@ describe('bilibiliRequest — -352 风控日志', () => {
 
   it('非 -352 错误不输出风控日志', async () => {
     mock$Fetch.mockResolvedValueOnce({ code: -1, message: '', data: {} }) // fetchBiliTicket
+    mock$Fetch.mockResolvedValueOnce(spiMock) // fetchBuvids
     mock$Fetch.mockResolvedValueOnce(wbiMock) // fetchWbiKeys
     mock$Fetch.mockResolvedValueOnce({ code: -400, message: '请求错误', data: {} })
 

@@ -41,6 +41,10 @@ const WBI_CACHE_TTL = 30 * 60 * 1000 // 30 minutes
 let biliTicketCache: { ticket: string; cachedAt: number } | null = null
 const TICKET_CACHE_TTL = 259200 * 1000 // 3 天（与 B站 ticket 有效期对齐）
 
+// buvid 设备指纹缓存（降低风控概率，长期有效）
+let buvidCache: { buvid3: string; buvid4: string; bNut: number; cachedAt: number } | null = null
+const BUVID_CACHE_TTL = 24 * 60 * 60 * 1000 // 1 天（指纹宜稳定，定期刷新防失效）
+
 /** 简单的异步延迟 */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -228,6 +232,66 @@ export async function prefetchBiliTicket(): Promise<void> {
 }
 
 // ============================================================
+// buvid 设备指纹（降低风控概率）
+// ============================================================
+
+/**
+ * 获取 buvid3 / buvid4 设备指纹
+ *
+ * API: GET /x/frontend/finger/spi
+ * 参考：bilibili-API-collect/docs/misc/buvid3_4.md
+ *
+ * buvid 是 B站风控画像的基础设备标识。服务器流量没有稳定设备指纹时，
+ * 高频请求更易被 -352 风控命中（v_voucher 文档明确建议 Cookie 携带
+ * buvid3 / buvid4 / b_nut）。
+ *
+ * b_nut 取首次获取时的 UNIX 秒级时间戳（与 buvid3 一并固化，模拟浏览器
+ * 首次访问时 Set-Cookie 的行为）。
+ */
+async function fetchBuvids(): Promise<{
+  buvid3: string
+  buvid4: string
+  bNut: number
+}> {
+  if (buvidCache && Date.now() - buvidCache.cachedAt < BUVID_CACHE_TTL) {
+    return { buvid3: buvidCache.buvid3, buvid4: buvidCache.buvid4, bNut: buvidCache.bNut }
+  }
+
+  try {
+    const res = await $fetch<{ code: number; data: { b_3: string; b_4: string } }>(
+      `${BILIBILI_API_BASE}/x/frontend/finger/spi`,
+      {
+        headers: DEFAULT_HEADERS,
+        timeout: 5000,
+      },
+    )
+
+    if (res.code === 0 && res.data?.b_3 && res.data?.b_4) {
+      buvidCache = {
+        buvid3: res.data.b_3,
+        buvid4: res.data.b_4,
+        bNut: Math.floor(Date.now() / 1000),
+        cachedAt: Date.now(),
+      }
+      return { buvid3: res.data.b_3, buvid4: res.data.b_4, bNut: buvidCache.bNut }
+    }
+  } catch {
+    // spi 接口偶尔失败，下次请求重试
+  }
+
+  return { buvid3: '', buvid4: '', bNut: 0 }
+}
+
+/**
+ * 预取 buvid 设备指纹（供 cache-warmer 启动时调用）
+ *
+ * 与 bili_ticket 一样提前获取，避免首次 API 请求与 spi 请求背靠背触发风控。
+ */
+export async function prefetchBuvids(): Promise<void> {
+  await fetchBuvids()
+}
+
+// ============================================================
 // 通用请求
 // ============================================================
 
@@ -260,6 +324,17 @@ export async function bilibiliRequest<T>(
         ? `${existingCookie}; bili_ticket=${ticket}`
         : `bili_ticket=${ticket}`
     }
+  }
+
+  // 附加 buvid 设备指纹（buvid3/buvid4/b_nut，降低风控概率）
+  // 参考：bilibili-API-collect/docs/misc/buvid3_4.md
+  const buvids = await fetchBuvids()
+  if (buvids.buvid3) {
+    const existingCookie = headers['Cookie'] || ''
+    const deviceCookie = `buvid3=${buvids.buvid3}; buvid4=${buvids.buvid4}; b_nut=${buvids.bNut}`
+    headers['Cookie'] = existingCookie
+      ? `${existingCookie}; ${deviceCookie}`
+      : deviceCookie
   }
 
   let params = { ...(options?.params || {}) }
@@ -330,7 +405,11 @@ export interface RankingVideo {
  * 获取 B站排行榜视频列表
  *
  * API: GET /x/web-interface/ranking/v2
- * 参数: rid（分区 tid，默认 0 全站）, type=all（全部）
+ * 参数: rid（分区 tid，默认 0 全站）, type=all（全部）, web_location（模拟网页来源，降低风控概率）
+ *
+ * 注意：无论 rid 取何值（全站 0 或任意分区），B站 该接口的 list 上限恒为 100 条
+ * （见 bilibili-API-collect docs/video_ranking/ranking.md：list 0-99）。
+ * 无分页参数，不要假设某分区可获取更多。
  *
  * @param rid - 分区 tid，默认 '0'（全站），仅支持主分区
  */
@@ -338,7 +417,7 @@ export async function getBilibiliRanking(rid: string = '0'): Promise<RankingVide
   const response = await bilibiliRequest<{ list: RankingVideo[] }>(
     '/x/web-interface/ranking/v2',
     {
-      params: { rid, type: 'all' },
+      params: { rid, type: 'all', web_location: '333.934' },
     },
   )
   const data = response.data as any

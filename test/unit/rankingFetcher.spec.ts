@@ -681,6 +681,27 @@ describe('fetchAllRankingLists — 全分区列表拉取', () => {
     expect(result.popular).toEqual([])
     expect(mockGetPopular).not.toHaveBeenCalled()
   })
+
+  it('看护：任何 rid 的列表上限为 100 条，且各分区数组独立完整保留', async () => {
+    // B站 /x/web-interface/ranking/v2 无论 rid 取何值（全站 0 或任意分区），
+    // list 上限恒为 100 条（ranking.md：list 0-99，无分页参数）。
+    // 守护该约定：若未来有人假设某分区可拉更多（加分页/翻倍逻辑），
+    // 或在分区之间合并/共享列表数组，此用例将失败。
+    mockGetRanking.mockImplementation(() =>
+      Promise.resolve(Array.from({ length: 100 }, (_, i) => makeRankingVideo(`BV${1000000000 + i}`))),
+    )
+    mockGetPopular.mockResolvedValue([])
+
+    const result = await fetchAllRankingLists()
+
+    // 每个 rid 完整保留 100 条，且各分区数组相互独立
+    expect(Object.keys(result.perRid)).toEqual(['0', '1', '3'])
+    for (const rid of ['0', '1', '3']) {
+      expect(result.perRid[rid]).toHaveLength(100)
+    }
+    expect(result.perRid['0']).not.toBe(result.perRid['1'])
+    expect(mockGetRanking).toHaveBeenCalledTimes(3)
+  })
 })
 
 // ============================================================
