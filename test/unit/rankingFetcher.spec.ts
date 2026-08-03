@@ -26,10 +26,23 @@ vi.mock('../../server/utils/bilibili', () => ({
 vi.mock('../../server/utils/rankingConstants', () => ({
   VALID_RANKING_RIDS: ['0', '1', '3'],
   COMBINED_CACHE_KEY: 'ranking:all',
+  POPULAR_CACHE_KEY: 'popular:latest',
+  ONLINE_TTL: 15 * 60 * 1000,
+  OFF_RANKING_KEEP_THRESHOLD: 500,
 }))
 
 // 动态导入（必须在 vi.mock 之后）
-const { retryFailedVideos, retryFailedMetadata, fetchRankingData, fetchAllRankings, sortAndFilterRanking } = await import('../../server/utils/rankingFetcher')
+const {
+  retryFailedVideos,
+  retryFailedMetadata,
+  fetchRankingData,
+  fetchAllRankingLists,
+  fetchOnlineCountForVideos,
+  mergePartitionCache,
+  selectOnlineTargets,
+  filterStaleOnlineTargets,
+  sortAndFilterRanking,
+} = await import('../../server/utils/rankingFetcher')
 
 /** 创建测试用的 VideoInfo */
 function makeVideo(overrides: Partial<{
@@ -588,167 +601,398 @@ describe('fetchRankingData — 端点跳过与失败追踪', () => {
 })
 
 // ============================================================
-// fetchAllRankings — 全分区多 rid 拉取 + 单 rid 重试
 // ============================================================
-describe('fetchAllRankings — 全分区拉取', () => {
+// fetchAllRankingLists — 全分区列表拉取（不拉在线人数）
+// ============================================================
+describe('fetchAllRankingLists — 全分区列表拉取', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockGetOnlineCount.mockResolvedValue({ formatted: '1000', raw: 1000 })
   })
 
-  it('全量模式：拉取全部 rid + 热门', async () => {
+  it('全量模式：拉取全部 rid + 热门（返回列表数据）', async () => {
     mockGetRanking
       .mockResolvedValueOnce([makeRankingVideo('BV0aa')])  // rid=0
       .mockResolvedValueOnce([makeRankingVideo('BV1bb')])  // rid=1
       .mockResolvedValueOnce([makeRankingVideo('BV3cc')])  // rid=3
     mockGetPopular.mockResolvedValue([makeRankingVideo('BV_pop')])
 
-    const result = await fetchAllRankings()
+    const result = await fetchAllRankingLists()
 
-    expect(result).not.toBeNull()
-    expect(result!.rankingFailed).toBe(false)
-    expect(result!.popularFailed).toBe(false)
-    expect(result!.failedRid).toBeUndefined()
-    expect(Object.keys(result!.data).length).toBe(4)
+    expect(result.rankingFailed).toBe(false)
+    expect(result.popularFailed).toBe(false)
+    expect(result.failedRid).toBeUndefined()
+    expect(Object.keys(result.perRid)).toEqual(['0', '1', '3'])
+    expect(result.perRid['0'][0].bvid).toBe('BV0aa')
+    expect(result.popular[0].bvid).toBe('BV_pop')
     expect(mockGetRanking).toHaveBeenCalledTimes(3)
-    expect(mockGetRanking).toHaveBeenCalledWith('0')
-    expect(mockGetRanking).toHaveBeenCalledWith('1')
-    expect(mockGetRanking).toHaveBeenCalledWith('3')
+    expect(mockGetPopular).toHaveBeenCalledTimes(1)
   })
 
-  it('全量模式：遇风控立即停止并返回 failedRid', async () => {
+  it('遇风控立即停止并返回 failedRid', async () => {
     mockGetRanking
-      .mockResolvedValueOnce([makeRankingVideo('BV0aa')])  // rid=0 ✅
-      .mockResolvedValueOnce([])                             // rid=1 ❌ 风控
-    // rid=3 不应被调用
+      .mockResolvedValueOnce([makeRankingVideo('BV0aa')])  // rid=0
+      .mockResolvedValueOnce([])                            // rid=1 风控
     mockGetPopular.mockResolvedValue([makeRankingVideo('BV_pop')])
 
-    const result = await fetchAllRankings()
+    const result = await fetchAllRankingLists()
 
-    expect(result).not.toBeNull()
-    expect(result!.rankingFailed).toBe(false) // rid=0 有数据
-    expect(result!.failedRid).toBe('1')
-    expect(Object.keys(result!.data).length).toBe(2) // rid=0 + popular
-    expect(mockGetRanking).toHaveBeenCalledTimes(2) // rid=0, rid=1（rid=3 未调用）
+    expect(result.failedRid).toBe('1')
+    expect(Object.keys(result.perRid)).toEqual(['0'])
+    expect(mockGetRanking).toHaveBeenCalledTimes(2) // rid=3 未调用
   })
 
-  it('全量模式：第一个 rid 就失败 → rankingFailed=true', async () => {
-    mockGetRanking.mockResolvedValue([]) // rid=0 风控
+  it('第一个 rid 就失败 → rankingFailed=true', async () => {
+    mockGetRanking.mockResolvedValue([])
     mockGetPopular.mockResolvedValue([makeRankingVideo('BV_pop')])
 
-    const result = await fetchAllRankings()
+    const result = await fetchAllRankingLists()
 
-    expect(result).not.toBeNull()
-    expect(result!.rankingFailed).toBe(true)
-    expect(result!.failedRid).toBe('0')
-    expect(Object.keys(result!.data).length).toBe(1) // 仅热门
-    expect(mockGetRanking).toHaveBeenCalledTimes(1)
+    expect(result.rankingFailed).toBe(true)
+    expect(result.failedRid).toBe('0')
+    expect(Object.keys(result.perRid)).toEqual([])
   })
 
   it('单 rid 模式：只请求指定 rid', async () => {
     mockGetRanking.mockResolvedValue([makeRankingVideo('BV1xx')])
 
-    const result = await fetchAllRankings({ singleRid: '1', skipPopular: true })
+    const result = await fetchAllRankingLists({ singleRid: '1', skipPopular: true })
 
-    expect(result).not.toBeNull()
-    expect(result!.rankingFailed).toBe(false)
-    expect(result!.failedRid).toBeUndefined()
-    expect(Object.keys(result!.data).length).toBe(1)
-    expect(mockGetRanking).toHaveBeenCalledTimes(1)
-    expect(mockGetRanking).toHaveBeenCalledWith('1')
+    expect(result.rankingFailed).toBe(false)
+    expect(result.failedRid).toBeUndefined()
+    expect(Object.keys(result.perRid)).toEqual(['1'])
     expect(mockGetPopular).not.toHaveBeenCalled()
-  })
-
-  it('单 rid 模式：失败时 rankingFailed=true 且返回 failedRid', async () => {
-    mockGetRanking.mockResolvedValue([])
-    const existing: VideosDataMap = { BV_OLD: makeVideo({ title: '保留' }) }
-
-    const result = await fetchAllRankings({ singleRid: '3', skipPopular: true, existingData: existing })
-
-    expect(result).not.toBeNull()
-    expect(result!.rankingFailed).toBe(true)
-    expect(result!.failedRid).toBe('3')
-    expect(Object.keys(result!.data).length).toBe(1) // 保留 existingData
-  })
-
-  it('单 rid 模式：失败但无 existingData 且无热门 → 返回 null', async () => {
-    mockGetRanking.mockResolvedValue([])
-
-    const result = await fetchAllRankings({ singleRid: '3', skipPopular: true })
-
-    // 没有 popular 也没有 existingData → null
-    // 但有 skipPopular 且 merged 全部为空
-    // 实际上是：merged 为空 + no existingData → null
-    expect(result).toBeNull()
   })
 
   it('skipRanking 跳过全部 rid', async () => {
     mockGetPopular.mockResolvedValue([makeRankingVideo('BV_pop')])
 
-    const result = await fetchAllRankings({ skipRanking: true })
+    const result = await fetchAllRankingLists({ skipRanking: true })
 
-    expect(result).not.toBeNull()
-    expect(result!.rankingFailed).toBe(false)
-    expect(result!.popularFailed).toBe(false)
-    expect(Object.keys(result!.data).length).toBe(1)
+    expect(Object.keys(result.perRid)).toEqual([])
+    expect(result.popular.length).toBe(1)
     expect(mockGetRanking).not.toHaveBeenCalled()
   })
 
   it('skipPopular 跳过热门', async () => {
     mockGetRanking.mockResolvedValue([makeRankingVideo('BV0aa')])
 
-    const result = await fetchAllRankings({ skipPopular: true })
+    const result = await fetchAllRankingLists({ skipPopular: true })
 
-    expect(result).not.toBeNull()
-    expect(result!.popularFailed).toBe(false)
-    expect(Object.keys(result!.data).length).toBeGreaterThanOrEqual(1)
+    expect(result.popular).toEqual([])
     expect(mockGetPopular).not.toHaveBeenCalled()
-  })
-
-  it('existingData 保留已有数据，新数据覆盖同 BVid', async () => {
-    const existing: VideosDataMap = {
-      BV_OLD: makeVideo({ title: '旧视频', owner: '旧UP主' }),
-    }
-
-    mockGetRanking.mockResolvedValue([makeRankingVideo('BV_NEW', { title: '新视频' })])
-    mockGetPopular.mockResolvedValue([])
-
-    const result = await fetchAllRankings({ existingData: existing, skipPopular: true })
-
-    expect(result).not.toBeNull()
-    expect(Object.keys(result!.data).length).toBe(2)
-    expect(result!.data['BV_OLD'].title).toBe('旧视频')
-    expect(result!.data['BV_NEW'].title).toBe('新视频')
-  })
-
-  it('全部端点失败且无 existingData → 返回 null', async () => {
-    mockGetRanking.mockResolvedValue([])
-    mockGetPopular.mockResolvedValue([])
-
-    const result = await fetchAllRankings()
-
-    expect(result).toBeNull()
-  })
-
-  it('全部端点失败但有 existingData → 保留旧数据', async () => {
-    const existing: VideosDataMap = {
-      BV_KEEP: makeVideo({ title: '保留视频' }),
-    }
-
-    mockGetRanking.mockResolvedValue([])
-    mockGetPopular.mockResolvedValue([])
-
-    const result = await fetchAllRankings({ existingData: existing })
-
-    expect(result).not.toBeNull()
-    expect(Object.keys(result!.data).length).toBe(1)
-    expect(result!.data['BV_KEEP'].title).toBe('保留视频')
-    expect(result!.rankingFailed).toBe(true)
-    expect(result!.popularFailed).toBe(true)
   })
 })
 
 // ============================================================
+// selectOnlineTargets — 弹幕量预筛选 + 轮转采样
+// ============================================================
+describe('selectOnlineTargets — 弹幕量预筛选 + 轮转', () => {
+  /** 创建带弹幕量的 RankingVideo */
+  function makeRankingVideoWithDanmaku(bvid: string, danmaku: number) {
+    return {
+      ...makeRankingVideo(bvid),
+      stat: { view: 1000, danmaku },
+    }
+  }
+
+  it('弹幕量降序取 TOP，剩余轮转', () => {
+    const candidates = [
+      makeRankingVideoWithDanmaku('BV_high', 1000),
+      makeRankingVideoWithDanmaku('BV_mid', 500),
+      makeRankingVideoWithDanmaku('BV_low', 100),
+    ]
+
+    const { top, rotated } = selectOnlineTargets(candidates, {
+      topCount: 1,
+      rotationBatch: 1,
+      rotationIndex: 0,
+    })
+
+    expect(top.map((v) => v.bvid)).toEqual(['BV_high'])
+    expect(rotated.map((v) => v.bvid)).toEqual(['BV_mid'])
+  })
+
+  it('轮转索引前进时取不同候选（环形）', () => {
+    const candidates = [
+      makeRankingVideoWithDanmaku('BV_a', 100),
+      makeRankingVideoWithDanmaku('BV_b', 90),
+      makeRankingVideoWithDanmaku('BV_c', 80),
+      makeRankingVideoWithDanmaku('BV_d', 70),
+    ]
+
+    const r1 = selectOnlineTargets(candidates, { topCount: 1, rotationBatch: 1, rotationIndex: 0 })
+    const r2 = selectOnlineTargets(candidates, { topCount: 1, rotationBatch: 1, rotationIndex: 1 })
+    const r3 = selectOnlineTargets(candidates, { topCount: 1, rotationBatch: 1, rotationIndex: 2 })
+
+    expect(r1.rotated[0].bvid).toBe('BV_b')
+    expect(r2.rotated[0].bvid).toBe('BV_c')
+    expect(r3.rotated[0].bvid).toBe('BV_d')
+  })
+
+  it('轮转索引超出候选数时环形回绕', () => {
+    const candidates = [
+      makeRankingVideoWithDanmaku('BV_a', 100),
+      makeRankingVideoWithDanmaku('BV_b', 90),
+      makeRankingVideoWithDanmaku('BV_c', 80),
+      makeRankingVideoWithDanmaku('BV_d', 70),
+    ]
+
+    // rotationIndex=3：rest 有 3 条（b/c/d），位置 3 % 3 = 0 → BV_b
+    const r1 = selectOnlineTargets(candidates, { topCount: 1, rotationBatch: 1, rotationIndex: 3 })
+    expect(r1.rotated[0].bvid).toBe('BV_b')
+
+    // rotationIndex=4：位置 4 % 3 = 1 → BV_c（环形）
+    const r2 = selectOnlineTargets(candidates, { topCount: 1, rotationBatch: 1, rotationIndex: 4 })
+    expect(r2.rotated[0].bvid).toBe('BV_c')
+  })
+
+  it('候选少于 TOP 数量时 rotated 为空', () => {
+    const candidates = [makeRankingVideoWithDanmaku('BV_a', 100)]
+
+    const { top, rotated } = selectOnlineTargets(candidates, {
+      topCount: 5,
+      rotationBatch: 2,
+      rotationIndex: 0,
+    })
+
+    expect(top.length).toBe(1)
+    expect(rotated).toEqual([])
+  })
+
+  it('topCount=0 时 top 为空，rotated 覆盖全部候选（分区均衡轮转）', () => {
+    const candidates = [
+      makeRankingVideoWithDanmaku('BV_a', 100),
+      makeRankingVideoWithDanmaku('BV_b', 90),
+      makeRankingVideoWithDanmaku('BV_c', 80),
+    ]
+
+    const { top, rotated } = selectOnlineTargets(candidates, {
+      topCount: 0,
+      rotationBatch: 2,
+      rotationIndex: 0,
+    })
+
+    expect(top).toEqual([])
+    expect(rotated.map((v) => v.bvid)).toEqual(['BV_a', 'BV_b'])
+  })
+})
+
+// ============================================================
+// filterStaleOnlineTargets — 在线人数新鲜度过滤
+// ============================================================
+describe('filterStaleOnlineTargets — 新鲜度过滤', () => {
+  const TTL = 15 * 60 * 1000
+  const now = 1_000_000_000_000
+
+  it('无缓存时全部需要请求', () => {
+    const targets = [makeRankingVideo('BV_a'), makeRankingVideo('BV_b')]
+    expect(filterStaleOnlineTargets(targets, null, TTL, now).length).toBe(2)
+  })
+
+  it('缓存新鲜（TTL 内）时跳过', () => {
+    const targets = [makeRankingVideo('BV_a')]
+    const cached = {
+      data: { BV_a: makeVideo({ count_num: 5000 }) },
+      timestamp: now - 5 * 60 * 1000,
+      onlineAt: { BV_a: now - 5 * 60 * 1000 },
+    }
+    expect(filterStaleOnlineTargets(targets, cached, TTL, now).length).toBe(0)
+  })
+
+  it('缓存过期（超过 TTL）时重新请求', () => {
+    const targets = [makeRankingVideo('BV_a')]
+    const cached = {
+      data: { BV_a: makeVideo({ count_num: 5000 }) },
+      timestamp: now - 20 * 60 * 1000,
+      onlineAt: { BV_a: now - 20 * 60 * 1000 },
+    }
+    expect(filterStaleOnlineTargets(targets, cached, TTL, now).length).toBe(1)
+  })
+
+  it('count_num=0（拉取失败）时重新请求', () => {
+    const targets = [makeRankingVideo('BV_a')]
+    const cached = {
+      data: { BV_a: makeVideo({ count_num: 0 }) },
+      timestamp: now - 60 * 1000,
+      onlineAt: { BV_a: now - 60 * 1000 },
+    }
+    expect(filterStaleOnlineTargets(targets, cached, TTL, now).length).toBe(1)
+  })
+
+  it('混合场景：只过滤新鲜的', () => {
+    const targets = [makeRankingVideo('BV_fresh'), makeRankingVideo('BV_stale')]
+    const cached = {
+      data: {
+        BV_fresh: makeVideo({ count_num: 5000 }),
+        BV_stale: makeVideo({ count_num: 5000 }),
+      },
+      timestamp: now,
+      onlineAt: {
+        BV_fresh: now - 60 * 1000,
+        BV_stale: now - 20 * 60 * 1000,
+      },
+    }
+    const result = filterStaleOnlineTargets(targets, cached, TTL, now)
+    expect(result.map((v) => v.bvid)).toEqual(['BV_stale'])
+  })
+})
+
+// ============================================================
+// mergePartitionCache — 分区缓存合并（防累积）
+// ============================================================
+describe('mergePartitionCache — 分区缓存合并', () => {
+  const now = 1_000_000_000_000
+
+  it('新列表为底：离开排行的视频被移除', () => {
+    const newList = { BV_new: makeVideo({ count_num: 0 }) }
+    const oldCache = {
+      data: {
+        BV_old: makeVideo({ count_num: 300 }), // 离开排行且 < 阈值 500 → 移除
+        BV_new: makeVideo({ count_num: 888 }),
+      },
+      timestamp: now - 60_000,
+      onlineAt: { BV_old: now - 60_000, BV_new: now - 60_000 },
+    }
+
+    const result = mergePartitionCache(newList, oldCache, {}, now)
+
+    expect(Object.keys(result.data)).toEqual(['BV_new'])
+  })
+
+  it('保留旧在线人数（仍在列表中、未被本轮覆盖）', () => {
+    const newList = { BV_a: makeVideo({ count_num: 0 }) }
+    const oldCache = {
+      data: { BV_a: makeVideo({ count_num: 5000, online_count: '5000+' }) },
+      timestamp: now - 60_000,
+      onlineAt: { BV_a: now - 60_000 },
+    }
+
+    const result = mergePartitionCache(newList, oldCache, {}, now)
+
+    expect(result.data.BV_a.count_num).toBe(5000)
+    expect(result.data.BV_a.online_count).toBe('5000+')
+    expect(result.onlineAt.BV_a).toBe(now - 60_000)
+  })
+
+  it('本轮新拉的在线人数覆盖旧值', () => {
+    const newList = { BV_a: makeVideo({ count_num: 0 }) }
+    const oldCache = {
+      data: { BV_a: makeVideo({ count_num: 5000 }) },
+      timestamp: now - 60_000,
+      onlineAt: { BV_a: now - 60_000 },
+    }
+    const newOnline = { BV_a: makeVideo({ count_num: 9999, online_count: '9999+' }) }
+
+    const result = mergePartitionCache(newList, oldCache, newOnline, now)
+
+    expect(result.data.BV_a.count_num).toBe(9999)
+    expect(result.onlineAt.BV_a).toBe(now)
+  })
+
+  it('本轮在线人数中不在列表里的视频被忽略', () => {
+    const newList = { BV_a: makeVideo({ count_num: 0 }) }
+    const newOnline = { BV_ghost: makeVideo({ count_num: 123 }) }
+
+    const result = mergePartitionCache(newList, null, newOnline, now)
+
+    expect(Object.keys(result.data)).toEqual(['BV_a'])
+  })
+
+  it('离开排行但在线人数 ≥ 阈值（500）→ 保留', () => {
+    const newList = { BV_new: makeVideo({ count_num: 0 }) }
+    const oldCache = {
+      data: {
+        BV_hot: makeVideo({ count_num: 5000, online_count: '5000+' }),
+        BV_new: makeVideo({ count_num: 0 }),
+      },
+      timestamp: now - 60_000,
+      onlineAt: { BV_hot: now - 60_000, BV_new: now - 60_000 },
+    }
+
+    const result = mergePartitionCache(newList, oldCache, {}, now)
+
+    expect(result.data.BV_hot).toBeDefined()
+    expect(result.data.BV_hot.count_num).toBe(5000)
+    expect(result.onlineAt.BV_hot).toBe(now - 60_000)
+  })
+
+  it('离开排行且在线人数 < 阈值（500）→ 移除', () => {
+    const newList = { BV_new: makeVideo({ count_num: 0 }) }
+    const oldCache = {
+      data: {
+        BV_cold: makeVideo({ count_num: 300 }),
+        BV_new: makeVideo({ count_num: 0 }),
+      },
+      timestamp: now - 60_000,
+      onlineAt: { BV_cold: now - 60_000, BV_new: now - 60_000 },
+    }
+
+    const result = mergePartitionCache(newList, oldCache, {}, now)
+
+    expect(result.data.BV_cold).toBeUndefined()
+  })
+
+  it('自定义保留阈值生效', () => {
+    const newList = { BV_new: makeVideo({ count_num: 0 }) }
+    const oldCache = {
+      data: {
+        BV_mid: makeVideo({ count_num: 1500 }),
+        BV_new: makeVideo({ count_num: 0 }),
+      },
+      timestamp: now - 60_000,
+      onlineAt: { BV_mid: now - 60_000, BV_new: now - 60_000 },
+    }
+
+    const result = mergePartitionCache(newList, oldCache, {}, now, 2000)
+
+    expect(result.data.BV_mid).toBeUndefined()
+  })
+
+  it('cids 合并：旧值保留 + 新列表覆盖', () => {
+    const newList = { BV_a: makeVideo({ count_num: 0 }), BV_b: makeVideo({ count_num: 0 }) }
+    const oldCache = {
+      data: { BV_a: makeVideo({ count_num: 0 }), BV_b: makeVideo({ count_num: 0 }) },
+      timestamp: now - 60_000,
+      onlineAt: {},
+      cids: { BV_a: 111, BV_old: 999 },
+    }
+
+    const result = mergePartitionCache(newList, oldCache, {}, now)
+    result.cids = { ...oldCache.cids, BV_a: 111, BV_b: 222 }
+
+    expect(result.cids).toEqual({ BV_a: 111, BV_old: 999, BV_b: 222 })
+  })
+})
+
+// ============================================================
+// fetchOnlineCountForVideos — 批量在线人数拉取
+// ============================================================
+describe('fetchOnlineCountForVideos — 批量在线人数', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockGetOnlineCount.mockResolvedValue({ formatted: '1000', raw: 1000 })
+  })
+
+  it('拉取在线人数并组装完整 VideoInfo', async () => {
+    const videos = [makeRankingVideo('BV_a')]
+    const { data } = await fetchOnlineCountForVideos(videos)
+
+    expect(data.BV_a).toBeDefined()
+    expect(data.BV_a.count_num).toBe(1000)
+    expect(data.BV_a.online_count).toBe('1000')
+    expect(data.BV_a.title).toBe('视频 BV_a')
+    expect(data.BV_a.danmaku_count_num).toBe(500)
+  })
+
+  it('在线人数为 0 时计入 failedBvids', async () => {
+    mockGetOnlineCount.mockResolvedValue({ formatted: '0', raw: 0 })
+    const videos = [makeRankingVideo('BV_a')]
+    const { failedBvids } = await fetchOnlineCountForVideos(videos)
+
+    expect(failedBvids).toEqual(['BV_a'])
+  })
+})
+
 // sortAndFilterRanking — 服务端排序过滤
 // ============================================================
 describe('sortAndFilterRanking — 服务端排序过滤', () => {

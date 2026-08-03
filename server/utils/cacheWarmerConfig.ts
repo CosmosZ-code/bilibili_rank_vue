@@ -4,8 +4,8 @@
  * 纯函数，不依赖 Nitro 运行时，可单元测试。
  */
 
-/** 默认刷新间隔：6 分钟 */
-export const DEFAULT_REFRESH_INTERVAL_MS = 6 * 60 * 1000
+/** 默认刷新间隔：5 分钟（与在线人数 TTL 15 分钟对应：3 轮一刷新） */
+export const DEFAULT_REFRESH_INTERVAL_MS = 5 * 60 * 1000
 
 /** 退避延迟序列（毫秒）：30s → 60s → 120s → 240s → 480s（封顶） */
 const BACKOFF_SEQUENCE = [30_000, 60_000, 120_000, 240_000, 480_000]

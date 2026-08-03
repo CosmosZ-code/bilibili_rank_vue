@@ -25,9 +25,9 @@ export default defineNuxtConfig({
       apiBase: 'https://api.bilibili.com',
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     },
-    // 排行榜缓存刷新间隔（毫秒），默认 4 分钟（env: NUXT_CACHE_WARMER_REFRESH_INTERVAL_MS）
+    // 排行榜缓存刷新间隔（毫秒），默认 5 分钟（env: NUXT_CACHE_WARMER_REFRESH_INTERVAL_MS）
     cacheWarmer: {
-      refreshIntervalMs: Number(process.env.NUXT_CACHE_WARMER_REFRESH_INTERVAL_MS) || 4 * 60 * 1000,
+      refreshIntervalMs: Number(process.env.NUXT_CACHE_WARMER_REFRESH_INTERVAL_MS) || 5 * 60 * 1000,
     },
     // SQLite 数据库文件路径（默认：项目根目录 data/bilibili_rank.db）
     dbPath: process.env.NUXT_DB_PATH || './data/bilibili_rank.db',

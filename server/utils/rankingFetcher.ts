@@ -4,7 +4,7 @@
  * 从 B站 API 获取排行榜 + 热门视频，合并去重后批量获取视频详情。
  * 供 API 路由（ranking.get.ts）和后台定时任务（cache-warmer）共同使用。
  */
-import type { VideosDataMap, VideoWithBvid } from '../../app/types'
+import type { VideosDataMap, VideoWithBvid, VideoInfo } from '../../app/types'
 import type { RankingVideo } from './bilibili'
 import {
   getBilibiliRanking,
@@ -15,7 +15,11 @@ import {
   dedupByBvid,
   formatCount,
 } from './bilibili'
-import { COMBINED_CACHE_KEY, VALID_RANKING_RIDS } from './rankingConstants'
+import {
+  COMBINED_CACHE_KEY,
+  VALID_RANKING_RIDS,
+  OFF_RANKING_KEEP_THRESHOLD,
+} from './rankingConstants'
 
 /**
  * 对 VideosDataMap 进行排序、搜索过滤、净化过滤，返回 VideoWithBvid[]
@@ -157,6 +161,312 @@ async function fetchOnlineCountBatch(
   return { results, failedBvids }
 }
 
+// ============================================================
+// 分区缓存（PartitionCache）相关
+// ============================================================
+
+/**
+ * 分区缓存条目结构
+ *
+ * - data: 该分区完整排行列表（含在线人数，未拉到则 count_num=0）
+ * - timestamp: 列表拉取时间
+ * - onlineAt: bvid → 在线人数拉取时间戳（用于新鲜度判断）
+ * - cids: bvid → cid（在线人数接口必需参数，从列表数据保存）
+ */
+export interface PartitionCacheEntry {
+  data: VideosDataMap
+  timestamp: number
+  onlineAt: Record<string, number>
+  cids?: Record<string, number>
+}
+
+/**
+ * 由列表数据构建 VideoInfo（无在线人数，count_num=0）
+ */
+export function buildVideoInfoFromList(video: RankingVideo): VideoInfo {
+  const statView = video.stat?.view || 0
+  const statDanmaku = video.stat?.danmaku || 0
+  return {
+    title: video.title || '',
+    owner: video.owner?.name || '',
+    mid: String(video.owner?.mid || ''),
+    pic: ensureHttps(video.pic || ''),
+    online_count: '0',
+    count_num: 0,
+    play_count_num: statView,
+    danmaku_count_num: statDanmaku,
+    play_count: formatCount(statView),
+    danmaku_count: formatCount(statDanmaku),
+  }
+}
+
+/**
+ * 合并分区缓存（防累积核心逻辑）
+ *
+ * - newList 为底（该分区当前完整排行，覆盖）
+ * - 仍在列表中的视频：保留旧在线人数（count_num > 0 且未被本轮覆盖时）
+ * - 离开排行的视频：在线人数 ≥ keepThreshold（默认 1000）才保留
+ *   （热门视频可能短暂跌出榜单，保留避免误移除；< 阈值则移除防累积）
+ * - 覆盖本轮新拉到的在线人数
+ * - cids 合并：旧值保留 + 新列表覆盖
+ *
+ * @param newList - 本轮拉取的完整列表（count_num=0）
+ * @param oldCache - 旧分区缓存（可能为 null）
+ * @param newOnline - 本轮拉到的在线人数数据
+ * @param now - 当前时间戳
+ * @param keepThreshold - 离开排行保留阈值（默认 1000）
+ */
+export function mergePartitionCache(
+  newList: VideosDataMap,
+  oldCache: PartitionCacheEntry | null,
+  newOnline: VideosDataMap,
+  now: number = Date.now(),
+  keepThreshold: number = OFF_RANKING_KEEP_THRESHOLD,
+): PartitionCacheEntry {
+  const data: VideosDataMap = { ...newList }
+  const onlineAt: Record<string, number> = {}
+  const cids: Record<string, number> = { ...(oldCache?.cids || {}) }
+
+  // 保留旧在线人数（仍在列表中、未被本轮覆盖）
+  if (oldCache) {
+    for (const [bvid, info] of Object.entries(oldCache.data)) {
+      if (data[bvid]) {
+        // 仍在列表中：保留旧在线人数（未被本轮覆盖时）
+        if (info.count_num > 0 && !newOnline[bvid]) {
+          data[bvid] = {
+            ...data[bvid],
+            online_count: info.online_count,
+            count_num: info.count_num,
+          }
+          if (oldCache.onlineAt[bvid]) {
+            onlineAt[bvid] = oldCache.onlineAt[bvid]
+          }
+        }
+      } else if (info.count_num >= keepThreshold) {
+        // 离开排行但在线人数 ≥ 阈值：保留（热门视频可能短暂跌出榜单）
+        data[bvid] = info
+        if (oldCache.onlineAt[bvid]) {
+          onlineAt[bvid] = oldCache.onlineAt[bvid]
+        }
+      }
+      // 离开排行且在线人数 < 阈值 → 移除（不进入 data，防累积）
+    }
+  }
+
+  // 本轮新拉的在线人数覆盖
+  for (const [bvid, info] of Object.entries(newOnline)) {
+    if (data[bvid]) {
+      data[bvid] = {
+        ...data[bvid],
+        online_count: info.online_count,
+        count_num: info.count_num,
+      }
+      onlineAt[bvid] = now
+    }
+  }
+
+  return { data, timestamp: now, onlineAt, cids }
+}
+
+// ============================================================
+// 在线人数目标选择（弹幕量预筛选 + 轮转采样）
+// ============================================================
+
+/**
+ * 选择本轮需要拉取在线人数的视频目标
+ *
+ * 策略：
+ * 1. 候选按弹幕量降序排序（列表数据自带 stat.danmaku，零成本）
+ * 2. 取前 topCount 为常驻 TOP（高互动视频）
+ * 3. 剩余候选中按轮转索引环形取 rotationBatch 条（覆盖全部候选）
+ *
+ * @param candidates - 候选视频（含 stat.danmaku）
+ * @param opts.topCount - 常驻 TOP 数量
+ * @param opts.rotationBatch - 每轮轮转数量
+ * @param opts.rotationIndex - 轮转索引（cache-warmer 模块级状态，逐轮递增）
+ */
+export function selectOnlineTargets(
+  candidates: RankingVideo[],
+  opts: { topCount: number; rotationBatch: number; rotationIndex: number },
+): { top: RankingVideo[]; rotated: RankingVideo[] } {
+  // 弹幕量降序（稳定排序：同弹幕量保持原顺序）
+  const sorted = [...candidates].sort(
+    (a, b) => (b.stat?.danmaku || 0) - (a.stat?.danmaku || 0),
+  )
+
+  const top = sorted.slice(0, opts.topCount)
+  const rest = sorted.slice(opts.topCount)
+
+  if (rest.length === 0) {
+    return { top, rotated: [] }
+  }
+
+  // 环形轮转：从 rotationIndex * rotationBatch 位置取 rotationBatch 条
+  const start = (opts.rotationIndex * opts.rotationBatch) % rest.length
+  const rotated = [
+    ...rest.slice(start, start + opts.rotationBatch),
+    ...rest.slice(0, Math.max(0, start + opts.rotationBatch - rest.length)),
+  ]
+
+  return { top, rotated }
+}
+
+/**
+ * 过滤掉缓存中仍新鲜的视频（复用旧值，不重复请求）
+ *
+ * 仅当缓存有该 bvid 且在线人数在 TTL 内拉取过 → 跳过。
+ * count_num <= 0 或 无时间戳 → 立即请求（新视频不受 TTL 限制）。
+ *
+ * @param targets - 目标视频
+ * @param cached - 分区缓存（可能为 null）
+ * @param ttl - 在线人数新鲜度 TTL（毫秒）
+ * @param now - 当前时间戳
+ */
+export function filterStaleOnlineTargets(
+  targets: RankingVideo[],
+  cached: PartitionCacheEntry | null,
+  ttl: number,
+  now: number = Date.now(),
+): RankingVideo[] {
+  if (!cached) return targets
+
+  return targets.filter((video) => {
+    const info = cached.data?.[video.bvid]
+    const onlineAt = cached.onlineAt?.[video.bvid]
+    // 无缓存值 或 在线人数过期 → 需要重新拉取
+    if (!info || info.count_num <= 0 || !onlineAt) return true
+    return now - onlineAt >= ttl
+  })
+}
+
+// ============================================================
+// 列表拉取（不拉在线人数，轻量）
+// ============================================================
+
+/**
+ * 拉取全部分区排行榜列表 + 热门列表（不拉在线人数）
+ *
+ * 逐 rid 请求，遇风控（返回空）停止并记录 failedRid。
+ * 列表数据自带 stat（播放量/弹幕量）和 cid，供弹幕量预筛选与在线人数拉取使用。
+ *
+ * @param options.singleRid - 单 rid 模式（独立重试时使用）
+ * @param options.skipRanking - 跳过排行拉取
+ * @param options.skipPopular - 跳过热门拉取
+ */
+export async function fetchAllRankingLists(options?: {
+  skipRanking?: boolean
+  skipPopular?: boolean
+  singleRid?: string
+}): Promise<{
+  perRid: Record<string, RankingVideo[]>
+  popular: RankingVideo[]
+  rankingFailed: boolean
+  popularFailed: boolean
+  failedRid?: string
+}> {
+  const apiTimeout = 10_000
+  let rankingFailed = false
+  let popularFailed = false
+  let failedRid: string | undefined
+  const perRid: Record<string, RankingVideo[]> = {}
+  let popular: RankingVideo[] = []
+
+  // 1. 热门（先行，为 ranking "预热"连接；4 页 = 200 条）
+  if (!options?.skipPopular) {
+    popular = await withTimeout(
+      getBilibiliPopular(4).catch(() => []),
+      apiTimeout,
+      [],
+    )
+    if (popular.length === 0) popularFailed = true
+
+    // 热门和排行之间间隔 1 秒
+    await new Promise((r) => setTimeout(r, 1000))
+  }
+
+  // 2. 排行榜（逐个 rid）
+  if (!options?.skipRanking) {
+    const ridsToFetch = options?.singleRid
+      ? [options.singleRid]
+      : [...VALID_RANKING_RIDS]
+
+    let allEmpty = true
+
+    for (let i = 0; i < ridsToFetch.length; i++) {
+      const rid = ridsToFetch[i]
+
+      const ranking = await withTimeout(
+        getBilibiliRanking(rid).catch(() => []),
+        apiTimeout,
+        [],
+      )
+
+      if (ranking.length > 0) {
+        perRid[rid] = ranking
+        allEmpty = false
+      } else {
+        // 风控触发：记录失败的 rid，停止处理剩余
+        failedRid = rid
+        break
+      }
+
+      // 单 rid 模式不需要间隔；全量模式每个 rid 间隔 500ms 防风控
+      if (!options?.singleRid && i < ridsToFetch.length - 1) {
+        await new Promise((r) => setTimeout(r, 500))
+      }
+    }
+
+    rankingFailed = allEmpty
+  }
+
+  return {
+    perRid,
+    popular,
+    rankingFailed: options?.skipRanking ? false : rankingFailed,
+    popularFailed: options?.skipPopular ? false : popularFailed,
+    failedRid,
+  }
+}
+
+/**
+ * 批量拉取视频的在线人数并组装 VideoInfo
+ *
+ * 每批 5 个并发，10 秒超时。拉取失败（raw=0）的 bvid 计入 failedBvids。
+ *
+ * @param videos - 目标视频（需含 bvid/cid 及列表元数据）
+ * @param apiTimeout - 单个请求超时（毫秒）
+ */
+export async function fetchOnlineCountForVideos(
+  videos: RankingVideo[],
+  apiTimeout: number = 10_000,
+): Promise<{ data: VideosDataMap; failedBvids: string[] }> {
+  const data: VideosDataMap = {}
+  const failedBvids: string[] = []
+
+  for (let i = 0; i < videos.length; i += 5) {
+    const batch = videos.slice(i, i + 5)
+    const { results: batchResults, failedBvids: batchFailed } = await fetchOnlineCountBatch(
+      batch,
+      apiTimeout,
+    )
+
+    failedBvids.push(...batchFailed)
+
+    for (const item of batchResults) {
+      const video = videos.find((v) => v.bvid === item.bvid)
+      if (!video) continue
+
+      data[item.bvid] = {
+        ...buildVideoInfoFromList(video),
+        online_count: item.onlineCount.formatted,
+        count_num: item.onlineCount.raw,
+      }
+    }
+  }
+
+  return { data, failedBvids }
+}
+
 /**
  * 从 B站 API 拉取完整的排行榜数据
  *
@@ -271,146 +581,6 @@ export async function fetchRankingData(options?: {
   }
 }
 
-/**
- * 拉取全部分区的排行榜数据，合并到统一 VideosDataMap
- *
- * 遍历全部 VALID_RANKING_RIDS（16 个分区），每个分区取 50 条，
- * 与热门数据合并去重后返回。支持两种模式：
- * - 全量模式（未传 singleRid）：逐个 rid 遍历，遇风控（返回空）立即停止
- * - 单 rid 模式（传 singleRid）：只请求指定 rid，用于退避重试
- *
- * @param options.singleRid - 单 rid 模式，只请求该分区
- * @returns RankingFetchResult & { failedRid? } — failedRid 指示在哪个 rid 触发风控
- */
-export async function fetchAllRankings(options?: {
-  cookie?: string
-  skipRanking?: boolean
-  skipPopular?: boolean
-  existingData?: VideosDataMap
-  singleRid?: string
-}): Promise<(RankingFetchResult & { failedRid?: string }) | null> {
-  const apiTimeout = 10_000
-  let rankingFailed = false
-  let popularFailed = false
-  let failedRid: string | undefined
-
-  // 1. 拉取热门（可跳过）
-  let popular: RankingVideo[] = []
-  if (!options?.skipPopular) {
-    popular = await withTimeout(
-      getBilibiliPopular(2, options?.cookie).catch(() => []),
-      apiTimeout,
-      [],
-    )
-    if (popular.length === 0) popularFailed = true
-
-    // 热门和排行之间间隔 1 秒
-    await new Promise((r) => setTimeout(r, 1000))
-  }
-
-  // 2. 拉取排行榜（逐个 rid）
-  let allRanking: RankingVideo[] = []
-
-  if (!options?.skipRanking) {
-    // 确定要请求的 rid 列表
-    const ridsToFetch = options?.singleRid
-      ? [options.singleRid]
-      : [...VALID_RANKING_RIDS]
-
-    let allEmpty = true
-
-    for (let i = 0; i < ridsToFetch.length; i++) {
-      const rid = ridsToFetch[i]
-
-      const ranking = await withTimeout(
-        getBilibiliRanking(rid).catch(() => []),
-        apiTimeout,
-        [],
-      )
-
-      if (ranking.length > 0) {
-        allRanking.push(...ranking)
-        allEmpty = false
-      } else {
-        // 风控触发：记录失败的 rid，停止处理剩余
-        failedRid = rid
-        break
-      }
-
-      // 单 rid 模式不需要间隔；全量模式每个 rid 间隔 500ms 防风控
-      if (!options?.singleRid && i < ridsToFetch.length - 1) {
-        await new Promise((r) => setTimeout(r, 500))
-      }
-    }
-
-    rankingFailed = allEmpty
-  }
-
-  // 3. 合并 + 去重
-  const merged = dedupByBvid([...allRanking, ...popular])
-
-  if (merged.length === 0 && (!options?.existingData || Object.keys(options.existingData).length === 0)) {
-    return null
-  }
-
-  // 4. 批量获取在线人数（以 existingData 为起点，新数据覆盖同 BVid）
-  const results: VideosDataMap = options?.existingData ? { ...options.existingData } : {}
-  const allFailedBvids: string[] = []
-  const allEmptyPicBvids: string[] = []
-  const allZeroStatBvids: string[] = []
-  const maxResults = Math.min(merged.length, 500)
-
-  for (let i = 0; i < maxResults; i += 5) {
-    const batch = merged.slice(i, i + 5)
-    const { results: batchResults, failedBvids } = await fetchOnlineCountBatch(batch, apiTimeout)
-
-    allFailedBvids.push(...failedBvids)
-
-    for (const item of batchResults) {
-      const video = merged.find((v) => v.bvid === item.bvid)
-      if (!video) continue
-
-      const statView = video.stat?.view || 0
-      const statDanmaku = video.stat?.danmaku || 0
-
-      const pic = ensureHttps(video.pic || '')
-      if (!isValidPic(pic)) {
-        allEmptyPicBvids.push(item.bvid)
-      }
-
-      if (statView === 0) {
-        allZeroStatBvids.push(item.bvid)
-      }
-
-      results[item.bvid] = {
-        title: video.title || '',
-        owner: video.owner?.name || '',
-        mid: String(video.owner?.mid || ''),
-        pic,
-        online_count: item.onlineCount.formatted,
-        count_num: item.onlineCount.raw,
-        play_count_num: statView,
-        danmaku_count_num: statDanmaku,
-        play_count: formatCount(statView),
-        danmaku_count: formatCount(statDanmaku),
-      }
-    }
-  }
-
-  return {
-    data: results,
-    failedBvids: allFailedBvids,
-    emptyPicBvids: allEmptyPicBvids,
-    zeroStatBvids: allZeroStatBvids,
-    rankingFailed: options?.skipRanking ? false : rankingFailed,
-    popularFailed: options?.skipPopular ? false : popularFailed,
-    failedRid,
-  }
-}
-
-/**
- * 重试获取失败视频的在线人数，并将成功结果合并回已有数据
- */
 export async function retryFailedVideos(
   failedBvids: string[],
   existingData: VideosDataMap,

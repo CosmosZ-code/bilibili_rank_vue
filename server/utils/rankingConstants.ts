@@ -29,6 +29,18 @@ export const DEFAULT_RID = '0'
 /** 全分区组合缓存 Key（合并全部 rid 的结果） */
 export const COMBINED_CACHE_KEY = 'ranking:all'
 
+/** 热门视频缓存 Key */
+export const POPULAR_CACHE_KEY = 'popular:latest'
+
+/** 在线人数新鲜度 TTL：15 分钟（TTL 内复用旧值，过期才重新拉取） */
+export const ONLINE_TTL = 15 * 60 * 1000
+
+/** 每轮刷新在线人数请求上限（防风控） */
+export const ONLINE_FETCH_LIMIT = 500
+
+/** 离开排行后保留在线人数的阈值：在线人数 ≥ 此值才保留（防误移除热门视频） */
+export const OFF_RANKING_KEEP_THRESHOLD = 500
+
 /** 生成分区排行榜缓存 Key */
 export function rankingCacheKey(rid: string): string {
   return `ranking:${rid}`
