@@ -30,9 +30,9 @@
           />
 
           <!-- 加载更多 -->
-          <div v-if="hasMoreFromServer" class="load-more" @click="loadMore">
+          <div v-if="vlHasMore" class="load-more" @click="loadMore">
             <span v-if="isLoadingMore">加载中...</span>
-            <span v-else>加载更多...</span>
+            <span v-else>下滑加载更多...</span>
           </div>
           <div v-else-if="!effectiveVideoLoading && displayedVideos.length > 0" class="load-more load-more--end">
             已展示全部 {{ displayedVideos.length }} 条结果
@@ -74,11 +74,16 @@
     </div>
 
     <BackToTop :show="showBackToTop" @click="onBackToTop" />
+
+    <!-- Toast 通知 -->
+    <ClientOnly>
+      <Toast />
+    </ClientOnly>
   </div>
 </template>
 
 <script setup lang="ts">
-import type { RankingResponse, VideoWithBvid, LiveRankingResponse, LiveArea, ViewMode, BannerDataSet } from '../types'
+import type { LiveRankingResponse, LiveArea, ViewMode, BannerDataSet } from '../types'
 import { shouldSkipRefresh } from '../utils/cache'
 import { formatDate, DATE_LOCALE_OPTIONS } from '../utils/date'
 
@@ -179,15 +184,12 @@ const updateTime = ref(
     ? formatDate(tsData.value.timestamp)
     : '加载中...',
 )
-const lastVideoTimestamp = ref(tsData.value?.timestamp ?? 0)
 const lastLiveTimestamp = ref(0)
 const lastAreaTimestamps = ref<Record<number, number>>({})
 
 // --- 视频分页 ---
 const PAGE_SIZE = 30
-const currentPage = ref(1)
 const isLoadingMore = ref(false)
-const extraItems = ref<VideoWithBvid[]>([])
 
 function buildQuery(page: number) {
   return {
@@ -199,54 +201,78 @@ function buildQuery(page: number) {
   }
 }
 
-// 视频首页数据（server: false 仅在客户端获取，SSR 时强制显示骨架屏）
-const { data: page1Data, pending: isLoading, error: fetchError } = useLazyAsyncData(
-  'ranking',
-  () => $fetch<RankingResponse>('/api/ranking', { query: buildQuery(1) }),
-  { watch: [videoSearchTerm, purifyPercent, sortBy], server: false },
+// 视频列表管理器（替代 useLazyAsyncData）
+const {
+  displayedVideos: vlDisplayedVideos,
+  initialLoading: vlInitialLoading,
+  initialError: vlInitialError,
+  hasMore: vlHasMore,
+  totalCount: vlTotalCount,
+  timestamp: vlTimestamp,
+  loadInitial,
+  refreshFilter,
+  forceRefresh,
+  loadMore: vlLoadMore,
+} = useVideoList()
+
+// 视频数据时间戳变化 → 更新页脚更新时间
+watch(vlTimestamp, (ts) => {
+  if (ts) updateTime.value = formatDate(ts)
+})
+
+// 首次加载（客户端执行，SSR 时显示骨架屏）
+if (import.meta.client) {
+  loadInitial(() => buildQuery(1))
+}
+
+// 过滤变化 → 无闪烁刷新（300ms 防抖内置于 refreshFilter）
+watch([videoSearchTerm, purifyPercent], () => {
+  refreshFilter(() => buildQuery(1))
+})
+
+// 数据为空时自动重试（cache warmer 尚未完成首次预热）
+function startEmptyRetry(checkPending: () => boolean, refresh: () => void) {
+  let delay = 2000
+  function schedule() {
+    if (!checkPending()) return // 数据已到，停止
+    setTimeout(() => {
+      refresh()
+      delay = Math.min(delay * 2, 15000) // 退避：2s→4s→8s→15s
+      schedule()
+    }, delay)
+  }
+  schedule()
+}
+
+if (import.meta.client) {
+  const videoPending = computed(() =>
+    !vlInitialLoading.value && vlTotalCount.value === 0 && !videoSearchTerm.value,
+  )
+  watch(videoPending, (pending) => {
+    if (pending) startEmptyRetry(() => videoPending.value, () => forceRefresh(() => buildQuery(1)))
+  })
+}
+
+// SSR 阶段 + 首次加载 → 骨架屏
+const effectiveVideoLoading = computed(() =>
+  vlInitialLoading.value || import.meta.server,
 )
 
-// SSR 阶段 server: false 导致 pending=false，需强制 loading 状态以显示骨架屏
-const videoLoading = computed(() => isLoading.value || import.meta.server)
+const displayedVideos = computed(() => vlDisplayedVideos.value)
 
-const displayedVideos = computed(() => {
-  const page1 = page1Data.value?.items || []
-  return [...page1, ...extraItems.value]
-})
+const error = computed(() => vlInitialError.value)
 
-const hasMoreFromServer = ref(true)
-
-watch(page1Data, (data) => {
-  if (!data) return
-  extraItems.value = []
-  currentPage.value = 1
-  hasMoreFromServer.value = data.hasMore
-  if (data.timestamp) {
-    lastVideoTimestamp.value = data.timestamp
-    updateTime.value = formatDate(data.timestamp)
-  }
-})
-
+// 加载更多（代理到 videoList）
 async function loadMore() {
-  if (!hasMoreFromServer.value || isLoadingMore.value) return
+  if (isLoadingMore.value || !vlHasMore.value) return
   isLoadingMore.value = true
-  const nextPage = currentPage.value + 1
+  const nextPage = Math.floor((vlDisplayedVideos.value || []).length / PAGE_SIZE) + 1
   try {
-    const res = await $fetch<RankingResponse>('/api/ranking', { query: buildQuery(nextPage) })
-    extraItems.value.push(...res.items)
-    hasMoreFromServer.value = res.hasMore
-    currentPage.value = nextPage
-  } catch {
-    // 加载失败静默
+    await vlLoadMore(() => buildQuery(nextPage))
   } finally {
     isLoadingMore.value = false
   }
 }
-
-const error = computed(() => {
-  if (fetchError.value) return (fetchError.value as any)?.message || '加载失败'
-  return null
-})
 
 // ============================================================
 // 直播模式
@@ -302,16 +328,11 @@ const { data: livePage1Data, pending: liveIsLoading, error: liveFetchError } = u
 const liveLoading = computed(() => liveIsLoading.value || import.meta.server)
 
 // 数据预热中（缓存为空 + 无搜索词 → 应显示骨架屏而非"无结果"）
-const videoDataPending = computed(() =>
-  !import.meta.server && !isLoading.value &&
-  page1Data.value?.total === 0 && !videoSearchTerm.value,
-)
 const liveDataPending = computed(() =>
   !import.meta.server && !liveIsLoading.value &&
   livePage1Data.value?.total === 0 && !liveSearchTerm.value,
 )
 
-const effectiveVideoLoading = computed(() => videoLoading.value || videoDataPending.value)
 const effectiveLiveLoading = computed(() => liveLoading.value || liveDataPending.value)
 
 const displayedLiveRooms = computed(() => {
@@ -359,14 +380,10 @@ const liveError = computed(() => {
 })
 
 // ============================================================
-// 共享刷新函数（供视图切换 + 回顶共用）
+// 刷新函数（供视图切换 + 回顶共用）
 // ============================================================
 async function refreshVideoData() {
-  try {
-    const { timestamp } = await $fetch('/api/ranking/timestamp')
-    if (shouldSkipRefresh(timestamp, lastVideoTimestamp.value)) return
-  } catch { /* 失败则照常刷新 */ }
-  refreshNuxtData('ranking')
+  forceRefresh(() => buildQuery(1))
 }
 
 async function refreshLiveData() {
@@ -409,10 +426,7 @@ watch(viewMode, async (mode) => {
     if (myVersion !== liveRefreshVersion) return
     await refreshLiveData()
   } else {
-    // 重置视频分页
-    extraItems.value = []
-    currentPage.value = 1
-    hasMoreFromServer.value = page1Data.value?.hasMore ?? true
+    // 重置视频数据（即时刷新，不防抖）
     await refreshVideoData()
   }
 })
@@ -431,28 +445,22 @@ watch(areaId, async (newAreaId, oldAreaId) => {
 })
 
 // ============================================================
-// 数据为空时自动重试（cache warmer 尚未完成首次预热）
+// 数据为空时自动重试（cache warmer 尚未完成首次预热 — 仅直播模式）
+// 注：视频模式的空数据重试已在 videoList 初始化块中处理
 // ============================================================
-function startEmptyRetry(key: string, checkPending: () => boolean) {
-  if (!import.meta.client) return
-  let delay = 2000
-  function schedule() {
-    if (!checkPending()) return // 数据已到，停止
-    setTimeout(() => {
-      refreshNuxtData(key)
-      delay = Math.min(delay * 2, 15000) // 退避：2s→4s→8s→15s
-      schedule()
-    }, delay)
-  }
-  schedule()
-}
-
-watch(videoDataPending, (pending) => {
-  if (pending) startEmptyRetry('ranking', () => videoDataPending.value)
-})
-
 watch(liveDataPending, (pending) => {
-  if (pending) startEmptyRetry('live-ranking', () => liveDataPending.value)
+  if (pending) {
+    let delay = 2000
+    function schedule() {
+      if (!liveDataPending.value) return
+      setTimeout(() => {
+        refreshNuxtData('live-ranking')
+        delay = Math.min(delay * 2, 15000)
+        schedule()
+      }, delay)
+    }
+    schedule()
+  }
 })
 
 // ============================================================
@@ -461,7 +469,7 @@ watch(liveDataPending, (pending) => {
 function onWheel(e: WheelEvent) {
   if (e.deltaY <= 0) return
   if (viewMode.value === 'videos') {
-    if (!hasMoreFromServer.value || isLoadingMore.value) return
+    if (!vlHasMore.value || isLoadingMore.value) return
   } else {
     if (!liveHasMoreFromServer.value || liveIsLoadingMore.value) return
   }
@@ -487,7 +495,7 @@ function onTouchMove(e: TouchEvent) {
   lastTouchY = currentY
   if (deltaY <= 0) return
   if (viewMode.value === 'videos') {
-    if (!hasMoreFromServer.value || isLoadingMore.value) return
+    if (!vlHasMore.value || isLoadingMore.value) return
   } else {
     if (!liveHasMoreFromServer.value || liveIsLoadingMore.value) return
   }
@@ -518,9 +526,6 @@ const { showButton: showBackToTop, scrollToTop } = useScrollToTop(300)
 function onBackToTop() {
   scrollToTop(async () => {
     if (viewMode.value === 'videos') {
-      extraItems.value = []
-      currentPage.value = 1
-      hasMoreFromServer.value = page1Data.value?.hasMore ?? true
       await refreshVideoData()
     } else {
       liveExtraItems.value = []

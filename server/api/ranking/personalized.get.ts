@@ -4,9 +4,10 @@
  * 返回用户个性化的增量热门视频（不在全局排行中的新增部分）。
  * 需要登录态，通过 auth 中间件注入的 bilibiliCookie 调用 B站 popular。
  *
- * 缓存策略：personalized:{uid}，TTL 10 分钟
+ * 缓存策略：缓存新鲜（5 分钟内）时零 B站 请求，直接返回缓存数据；
+ * 过期才重新拉取（防风控）。拉取失败时返回旧缓存（不覆盖）。
  */
-import { fetchPersonalizedOnly } from '../../utils/rankingFetcher'
+import { getOrFetchPersonalized } from '../../utils/personalizedCache'
 
 export default defineEventHandler(async (event) => {
   const cookie = event.context.bilibiliCookie
@@ -16,27 +17,8 @@ export default defineEventHandler(async (event) => {
     return {}
   }
 
-  const cacheKey = `personalized:${user.id}`
-  const cacheTTL = 10 * 60 * 1000 // 10 分钟
+  // 统一缓存策略：新鲜返回缓存，过期拉取，失败回退旧缓存
+  const data = await getOrFetchPersonalized(user, cookie)
 
-  // 检查缓存
-  const cached = await useStorage('cache').getItem<{
-    data: Record<string, any>
-    timestamp: number
-  }>(cacheKey)
-
-  if (cached && Date.now() - cached.timestamp < cacheTTL) {
-    return cached.data
-  }
-
-  // 拉取增量
-  const data = await fetchPersonalizedOnly(cookie)
-
-  if (data) {
-    await useStorage('cache').setItem(cacheKey, { data, timestamp: Date.now() })
-    return data
-  }
-
-  // 拉取失败，返回空（不覆盖旧缓存）
-  return cached?.data || {}
+  return data || {}
 })

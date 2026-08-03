@@ -7,6 +7,7 @@
 import { pollQrCode } from '../../utils/bilibili'
 import { handleLoginSuccess, getSessionUser } from '../../utils/auth'
 import { fetchPersonalizedOnly } from '../../utils/rankingFetcher'
+import { setPersonalizedCache } from '../../utils/personalizedCache'
 
 export default defineEventHandler(async (event) => {
   const query = getQuery(event)
@@ -43,10 +44,7 @@ export default defineEventHandler(async (event) => {
         try {
           const data = await fetchPersonalizedOnly(result.cookie!)
           if (data) {
-            await useStorage('cache').setItem(
-              `personalized:${session.user.id}`,
-              { data, timestamp: Date.now() },
-            )
+            await setPersonalizedCache(session.user.id, data)
           }
         } catch {
           // 预热失败不影响登录

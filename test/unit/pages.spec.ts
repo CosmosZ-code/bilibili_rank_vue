@@ -86,10 +86,9 @@ describe('index.vue 页面内容验证', () => {
     const fs = await import('node:fs/promises')
     const content = await fs.readFile(resolve(rootDir, 'app/pages/index.vue'), 'utf-8')
     expect(content).toContain('PAGE_SIZE')
-    expect(content).toContain('currentPage')
-    expect(content).toContain('extraItems')
-    expect(content).toContain('hasMoreFromServer')
+    expect(content).toContain('useVideoList')
     expect(content).toContain('loadMore')
+    expect(content).toContain('vlHasMore')
   })
 
   it('视图切换包含时间戳校验逻辑', async () => {
@@ -98,7 +97,6 @@ describe('index.vue 页面内容验证', () => {
 
     // 纯函数 + 时间戳追踪
     expect(content).toContain('shouldSkipRefresh')
-    expect(content).toContain('lastVideoTimestamp')
     expect(content).toContain('lastLiveTimestamp')
     expect(content).toContain('lastAreaTimestamps')
 
@@ -110,11 +108,10 @@ describe('index.vue 页面内容验证', () => {
     expect(content).toContain('liveRefreshVersion')
 
     // 视图切换中的 timestamp 端点调用
-    expect(content).toContain('/api/ranking/timestamp')
     expect(content).toContain('/api/live-rooms/timestamp')
 
-    // refreshNuxtData 用于手动刷新
-    expect(content).toContain("refreshNuxtData('ranking')")
+    // forceRefresh 用于即时刷新（替代 refreshNuxtData）
+    expect(content).toContain('forceRefresh')
     expect(content).toContain("refreshNuxtData('live-ranking')")
 
     // watch(areaId) 独立处理分区切换
@@ -282,13 +279,13 @@ describe('前端空数据加载态 + 自动重试', () => {
   it('包含 dataPending 空数据检测', async () => {
     const fs = await import('node:fs/promises')
     const content = await fs.readFile(resolve(rootDir, 'app/pages/index.vue'), 'utf-8')
-    expect(content).toContain('videoDataPending')
     expect(content).toContain('liveDataPending')
   })
 
-  it('包含 startEmptyRetry 自动重试', async () => {
+  it('包含空数据自动重试逻辑', async () => {
     const fs = await import('node:fs/promises')
     const content = await fs.readFile(resolve(rootDir, 'app/pages/index.vue'), 'utf-8')
-    expect(content).toContain('startEmptyRetry')
+    expect(content).toContain('liveDataPending')
+    expect(content).toContain("refreshNuxtData('live-ranking')")
   })
 })

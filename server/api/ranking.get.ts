@@ -17,6 +17,7 @@
 import type { CacheEntry, VideosDataMap, RankingResponse } from '../../app/types'
 import { sortAndFilterRanking } from '../utils/rankingFetcher'
 import { COMBINED_CACHE_KEY, DEFAULT_PAGE_SIZE, DEFAULT_SORT_BY } from '../utils/rankingConstants'
+import { getPersonalizedCache } from '../utils/personalizedCache'
 
 export default defineEventHandler(async (event) => {
   const query = getQuery(event)
@@ -57,23 +58,17 @@ export default defineEventHandler(async (event) => {
   }
 
   // 3. 合并个性化数据（已登录用户）
-  try {
-    const session = await useSession<UserSession>(event)
-    if (session?.data?.bilibiliUid) {
-      const personalCache = await useStorage('cache').getItem<CacheEntry<VideosDataMap>>(
-        `personalized:${session.data.bilibiliUid}`,
-      )
-      if (personalCache?.data && Date.now() - personalCache.timestamp < cacheTTL) {
-        // 合并个性化数据（不覆盖全局已有的 BVid）
-        for (const [bvid, info] of Object.entries(personalCache.data)) {
-          if (!dataMap[bvid]) {
-            dataMap[bvid] = info
-          }
+  // auth 中间件已注入 event.context.user，直接使用其内部 id 作为缓存 key
+  const user = event.context.user
+  if (user) {
+    const personalCache = await getPersonalizedCache(user.id)
+    if (personalCache?.data && Date.now() - personalCache.timestamp < cacheTTL) {
+      for (const [bvid, info] of Object.entries(personalCache.data)) {
+        if (!dataMap[bvid]) {
+          dataMap[bvid] = info
         }
       }
     }
-  } catch {
-    // 个性化合并失败静默，不影响主流程
   }
 
   // 4. 排序 + 过滤
