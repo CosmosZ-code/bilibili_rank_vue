@@ -17,7 +17,7 @@
 import type { CacheEntry, VideosDataMap, RankingResponse } from '../../app/types'
 import { sortAndFilterRanking } from '../utils/rankingFetcher'
 import { COMBINED_CACHE_KEY, DEFAULT_PAGE_SIZE, DEFAULT_SORT_BY } from '../utils/rankingConstants'
-import { getPersonalizedCache } from '../utils/personalizedCache'
+import { getPersonalizedCache, PERSONALIZED_CACHE_TTL } from '../utils/personalizedCache'
 
 export default defineEventHandler(async (event) => {
   const query = getQuery(event)
@@ -62,7 +62,7 @@ export default defineEventHandler(async (event) => {
   const user = event.context.user
   if (user) {
     const personalCache = await getPersonalizedCache(user.id)
-    if (personalCache?.data && Date.now() - personalCache.timestamp < cacheTTL) {
+    if (personalCache?.data && Date.now() - personalCache.timestamp < PERSONALIZED_CACHE_TTL) {
       for (const [bvid, info] of Object.entries(personalCache.data)) {
         if (!dataMap[bvid]) {
           dataMap[bvid] = info

@@ -9,7 +9,7 @@
  * - 保留旧缓存：B站不可达时保留已有真实数据，仅在缓存为空时才写入 mock
  * - 失败视频重试：部分视频在线人数获取失败时，在完整刷新周期之间单独重试
  *
- * 刷新间隔通过环境变量 NUXT_CACHE_WARMER_REFRESH_INTERVAL_MS 配置（默认 4 分钟）。
+ * 刷新间隔通过环境变量 NUXT_CACHE_WARMER_REFRESH_INTERVAL_MS 配置（默认 5 分钟，见 cacheWarmerConfig）。
  * 不依赖 Nitro cron Task 系统，在 dev / production / Docker 中行为一致。
  */
 import {

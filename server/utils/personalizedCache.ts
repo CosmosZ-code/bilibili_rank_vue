@@ -4,9 +4,10 @@
  * 统一管理个性化视频缓存的 key 生成、读取、拉取与写入。
  * 消除多个 API 路由中重复的缓存逻辑（DRY）。
  */
-import type { CacheEntry, VideosDataMap } from '../../app/types'
+import type { VideosDataMap } from '../../app/types'
 import type { AuthUser } from './auth'
-import { fetchPersonalizedOnly } from './rankingFetcher'
+import { fetchPersonalizedOnly, mergePersonalizedPreserved } from './rankingFetcher'
+import type { PersonalizedCacheEntry } from './rankingFetcher'
 
 /** 缓存 key 前缀 */
 export const PERSONALIZED_CACHE_PREFIX = 'personalized:'
@@ -24,16 +25,20 @@ export function personalizedCacheKey(userId: number): string {
  */
 export async function getPersonalizedCache(
   userId: number,
-): Promise<CacheEntry<VideosDataMap> | null> {
-  return useStorage('cache').getItem<CacheEntry<VideosDataMap>>(personalizedCacheKey(userId))
+): Promise<PersonalizedCacheEntry | null> {
+  return useStorage('cache').getItem<PersonalizedCacheEntry>(personalizedCacheKey(userId))
 }
 
 /**
- * 写入用户个性化缓存
+ * 写入用户个性化缓存（timestamp 刷新 = TTL 续期）
  */
-export async function setPersonalizedCache(userId: number, data: VideosDataMap): Promise<void> {
+export async function setPersonalizedCache(
+  userId: number,
+  entry: { data: VideosDataMap; cids?: Record<string, number> },
+): Promise<void> {
   await useStorage('cache').setItem(personalizedCacheKey(userId), {
-    data,
+    data: entry.data,
+    cids: entry.cids,
     timestamp: Date.now(),
   })
 }
@@ -58,10 +63,13 @@ export async function getOrFetchPersonalized(
 
   // 缓存过期 → 重新拉取
   try {
-    const data = await fetchPersonalizedOnly(cookie)
-    if (data) {
-      await setPersonalizedCache(user.id, data)
-      return data
+    const fresh = await fetchPersonalizedOnly(cookie)
+    if (fresh) {
+      // 合并保留：跌出热门榜但在线人数 ≥ 阈值的视频不被覆盖淘汰，
+      // 用缓存 cid 续拉在线人数并刷新 TTL，直到人数 < 阈值
+      const merged = await mergePersonalizedPreserved(cached, fresh, cookie)
+      await setPersonalizedCache(user.id, merged)
+      return merged.data
     }
   } catch {
     // 拉取失败静默，不覆盖旧缓存

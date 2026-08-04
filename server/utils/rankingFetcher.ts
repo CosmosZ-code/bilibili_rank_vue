@@ -164,6 +164,19 @@ export interface PartitionCacheEntry {
 }
 
 /**
+ * 个性化缓存条目结构
+ *
+ * - data: 该用户个性化增量视频（含在线人数）
+ * - timestamp: 缓存写入时间（TTL 续期基准）
+ * - cids: bvid → cid（在线人数接口必需参数，供保留视频续期拉取）
+ */
+export interface PersonalizedCacheEntry {
+  data: VideosDataMap
+  timestamp: number
+  cids?: Record<string, number>
+}
+
+/**
  * 由列表数据构建 VideoInfo（无在线人数，count_num=0）
  */
 export function buildVideoInfoFromList(video: RankingVideo): VideoInfo {
@@ -609,11 +622,14 @@ export async function retryFailedMetadata(
  *
  * 与全局 ranking:latest 对比，排除已存在的 BV 号，
  * 只返回该用户独有（不在全局排行中）的新视频。
+ * cids 一并收集（在线人数接口必需参数，随缓存保存供后续续期拉取）。
  *
  * @param cookie - 用户的 B站 Cookie
- * @returns VideosDataMap — 仅包含增量视频；null — 拉取失败或 cookie 无效
+ * @returns 增量视频 + cids 映射；null — 拉取失败或 cookie 无效
  */
-export async function fetchPersonalizedOnly(cookie: string): Promise<VideosDataMap | null> {
+export async function fetchPersonalizedOnly(
+  cookie: string,
+): Promise<{ data: VideosDataMap; cids: Record<string, number> } | null> {
   const apiTimeout = 10_000
 
   // 1. 拉取全局缓存，获取已有 BV 号集合
@@ -637,13 +653,13 @@ export async function fetchPersonalizedOnly(cookie: string): Promise<VideosDataM
 
   // 3. 排除全局已有的视频
   const newVideos = popular.filter((v) => !existingBvids.has(v.bvid))
-  if (newVideos.length === 0) return {}
+  if (newVideos.length === 0) return { data: {}, cids: {} }
 
-  // 4. 批量获取在线人数
+  // 4. 批量获取在线人数（全部增量，不做截断）
   const results: VideosDataMap = {}
-  const maxResults = Math.min(newVideos.length, 20) // 增量最多 20 个
+  const cids: Record<string, number> = {}
 
-  for (let i = 0; i < maxResults; i += 5) {
+  for (let i = 0; i < newVideos.length; i += 5) {
     const batch = newVideos.slice(i, i + 5)
     const { results: batchResults } = await fetchOnlineCountBatch(batch, apiTimeout)
 
@@ -667,8 +683,78 @@ export async function fetchPersonalizedOnly(cookie: string): Promise<VideosDataM
         play_count: formatCount(statView),
         danmaku_count: formatCount(statDanmaku),
       }
+      cids[item.bvid] = video.cid
     }
   }
 
-  return results
+  return { data: results, cids }
+}
+
+/**
+ * 个性化缓存合并（防淘汰核心逻辑，与 mergePartitionCache 同构）
+ *
+ * - fresh（本轮新增量）为底
+ * - 旧缓存中不在 fresh 里的视频（已跌出热门榜增量）：
+ *   - 在线人数 ≥ OFF_RANKING_KEEP_THRESHOLD → 保留候选，用缓存 cid 重新拉在线人数：
+ *     新值 ≥ 阈值 → 保留并更新在线人数；新值 < 阈值（含 0 / 失败兜底）→ 淘汰
+ *   - 在线人数 < 阈值 → 移除（防累积）
+ *   - 无 cid（旧版缓存首次升级的过渡）→ 保留旧值，下一轮即有 cid 可更新
+ * - cids 合并：旧值保留 + 新增量覆盖
+ *
+ * @param previous - 旧个性化缓存（可能为 null）
+ * @param fresh - 本轮拉取的新增量（含 cids）
+ * @param cookie - 用户的 B站 Cookie
+ */
+export async function mergePersonalizedPreserved(
+  previous: PersonalizedCacheEntry | null,
+  fresh: { data: VideosDataMap; cids: Record<string, number> },
+  cookie: string,
+): Promise<{ data: VideosDataMap; cids: Record<string, number> }> {
+  const apiTimeout = 10_000
+  const data: VideosDataMap = { ...fresh.data }
+  const cids: Record<string, number> = { ...(previous?.cids || {}), ...fresh.cids }
+
+  if (!previous) return { data, cids }
+
+  // 离开增量但仍可能热门的视频（在线人数 ≥ 阈值才进入候选）
+  const candidates: Array<{ bvid: string; info: VideoInfo; cid?: number }> = []
+  for (const [bvid, info] of Object.entries(previous.data)) {
+    if (data[bvid]) continue // 仍在增量中（fresh 已覆盖）
+    if (info.count_num >= OFF_RANKING_KEEP_THRESHOLD) {
+      candidates.push({ bvid, info, cid: cids[bvid] })
+    }
+    // < 阈值 → 移除（不写入 data，防累积）
+  }
+
+  if (candidates.length === 0) return { data, cids }
+
+  // 重新拉取保留候选的在线人数（每 5 个一批，与增量拉取一致）
+  const onlineByBvid = new Map<string, { formatted: string; raw: number }>()
+  const withCid = candidates.filter((c) => typeof c.cid === 'number' && c.cid > 0)
+  for (let i = 0; i < withCid.length; i += 5) {
+    const batch = withCid.slice(i, i + 5).map((c) => ({ bvid: c.bvid, cid: c.cid! }))
+    const { results } = await fetchOnlineCountBatch(batch, apiTimeout)
+    for (const r of results) {
+      onlineByBvid.set(r.bvid, r.onlineCount)
+    }
+  }
+
+  for (const { bvid, info, cid } of candidates) {
+    const freshOnline = onlineByBvid.get(bvid)
+    if (freshOnline) {
+      // 拉取成功：新值 ≥ 阈值 → 保留并更新；< 阈值（含 0/失败）→ 淘汰
+      if (freshOnline.raw >= OFF_RANKING_KEEP_THRESHOLD) {
+        data[bvid] = {
+          ...info,
+          online_count: freshOnline.formatted,
+          count_num: freshOnline.raw,
+        }
+      }
+    } else if (typeof cid !== 'number' || cid <= 0) {
+      // 无 cid（旧版缓存）：保留旧值续期，下一轮即有 cid 可正常更新
+      data[bvid] = info
+    }
+  }
+
+  return { data, cids }
 }

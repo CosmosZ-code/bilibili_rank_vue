@@ -198,6 +198,9 @@ export function useVideoList() {
   function forceRefresh(queryBuilder: () => Record<string, any>) {
     clearTimeout(debounceTimer)
     executeRefresh(queryBuilder, { replace: true })
+    // 顺带刷新个性化（服务端 5 分钟缓存兜底：缓存新鲜时零 B站 请求，
+    // 过期才拉取，不会因回顶/切视图频繁触发而打 B站）
+    refreshPersonalized()
   }
 
   // ---- 加载更多 ----
@@ -228,22 +231,23 @@ export function useVideoList() {
       )
       if (!res.added || res.added.length === 0) return
 
-      // 签名去重：缓存未变（返回相同增量）时不重复合并/通知
-      const signature = buildPersonalizedSignature(res.added)
-      if (signature === lastNotifiedSignature) return
-      lastNotifiedSignature = signature
-
-      // 实际新增：不在 Map 中的视频（部分可能已被 GET /api/ranking 合并）
+      // 合并总是执行（bvid 去重幂等）：
+      // 个性化缓存过期后 GET /api/ranking 不再合并，若此处跳过合并，
+      // 已从 Map 中被替换掉的个性化视频将无法恢复
       const allVideos = [...videosMap.value.values()]
       const existingBvids = new Set(allVideos.map((v) => v.bvid))
       const actuallyAdded = res.added.filter((v) => !existingBvids.has(v.bvid))
-      if (actuallyAdded.length === 0) return // 全部已存在，不弹通知
 
       const merged = mergeAndSortVideos(allVideos, res.added)
-
       videosMap.value = new Map(merged.map((v) => [v.bvid, v]))
       // 确保至少显示第一页
       displayedCount.value = Math.max(displayedCount.value, 30)
+
+      // 仅通知去重：全部已存在或增量未变（返回相同集合）时不重复弹 toast
+      if (actuallyAdded.length === 0) return
+      const signature = buildPersonalizedSignature(res.added)
+      if (signature === lastNotifiedSignature) return
+      lastNotifiedSignature = signature
 
       // 通知（数量 = 实际新增数）
       const titles = actuallyAdded.map((v) => v.title)
