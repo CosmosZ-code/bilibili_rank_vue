@@ -12,7 +12,6 @@ import {
   getBilibiliOnlineCount,
   getBilibiliVideoStats,
   ensureHttps,
-  dedupByBvid,
   formatCount,
 } from './bilibili'
 import {
@@ -70,22 +69,6 @@ export function sortAndFilterRanking(
   }
 
   return list
-}
-
-/** fetchRankingData 成功时的返回值 */
-export interface RankingFetchResult {
-  /** 合并去重后的视频数据字典 */
-  data: VideosDataMap
-  /** 在线人数获取失败的 BV 号列表（count_num === 0），通过 /x/player/online/total 重试 */
-  failedBvids: string[]
-  /** 封面链接为空或非 https 的 BV 号列表，通过 /x/web-interface/view 重试 */
-  emptyPicBvids: string[]
-  /** 播放量为 0 的 BV 号列表（排行榜视频不应为 0），通过 /x/web-interface/view 重试 */
-  zeroStatBvids: string[]
-  /** 排行接口是否失败（返回 0 条） */
-  rankingFailed: boolean
-  /** 热门接口是否失败（返回 0 条） */
-  popularFailed: boolean
 }
 
 /** retryFailedVideos 的返回值 */
@@ -269,8 +252,30 @@ export function mergePartitionCache(
 }
 
 // ============================================================
-// 在线人数目标选择（弹幕量预筛选 + 轮转采样）
+// 在线人数目标选择（跨 rid 去重 + 弹幕量预筛选 + 轮转采样）
 // ============================================================
+
+/**
+ * 跨 rid 去重：保留较小 rid 的版本（如 0、2 重复保留 0）
+ *
+ * 按 VALID_RANKING_RIDS 升序遍历（0 全站最先），同一 bvid 首次出现即保留，
+ * 后续分区中的重复条目不再覆盖。全站 rid=0 的视频在去重池中占主导，
+ * 只有全站独有的视频（不出现在任何分区列表）才由其自身贡献。
+ *
+ * @param perRidVideos - 分区 → 视频列表（正常模式来自本轮拉取，退避模式来自分区缓存）
+ * @returns 去重后的全局候选列表
+ */
+export function dedupRankingVideos(perRidVideos: Record<string, RankingVideo[]>): RankingVideo[] {
+  const map = new Map<string, RankingVideo>()
+  for (const rid of VALID_RANKING_RIDS) {
+    for (const video of perRidVideos[rid] || []) {
+      if (!map.has(video.bvid)) {
+        map.set(video.bvid, video)
+      }
+    }
+  }
+  return [...map.values()]
+}
 
 /**
  * 选择本轮需要拉取在线人数的视频目标
@@ -469,120 +474,6 @@ export async function fetchOnlineCountForVideos(
   }
 
   return { data, failedBvids }
-}
-
-/**
- * 从 B站 API 拉取完整的排行榜数据
- *
- * 流程：
- * 1. 串行请求排行榜 → 热门（各 10 秒超时），可通过 skipRanking/skipPopular 跳过
- * 2. 合并 + 按 BV 号去重（如传入 existingData 则以此为起点覆盖）
- * 3. 批量获取每个视频的在线人数（每批 5 个）
- * 4. 校验封面链接和播放量有效性
- *
- * @param options.cookie - 可选，传入用户的 B站 Cookie 使热门结果个性化
- * @param options.skipRanking - 跳过排行拉取（保留 existingData 中已有数据）
- * @param options.skipPopular - 跳过热门拉取（保留 existingData 中已有数据）
- * @param options.existingData - 已有数据，新拉取结果会覆盖同 BVid 条目
- * @returns RankingFetchResult — 正常数据 + 失败追踪；null — B站完全不可用
- */
-export async function fetchRankingData(options?: {
-  cookie?: string
-  skipRanking?: boolean
-  skipPopular?: boolean
-  existingData?: VideosDataMap
-  rid?: string
-}): Promise<RankingFetchResult | null> {
-  const apiTimeout = 10_000
-  let rankingFailed = false
-  let popularFailed = false
-
-  // 1. 拉取热门（可跳过）—— 先行，为 ranking "预热" 连接
-  let popular: RankingVideo[] = []
-  if (!options?.skipPopular) {
-    popular = await withTimeout(
-      getBilibiliPopular(2, options?.cookie).catch(() => []),
-      apiTimeout,
-      [],
-    )
-    if (popular.length === 0) popularFailed = true
-
-    // 热门和排行之间间隔 1 秒
-    await new Promise((r) => setTimeout(r, 1000))
-  }
-
-  // 2. 拉取排行榜（可跳过）
-  let ranking: RankingVideo[] = []
-  if (!options?.skipRanking) {
-    ranking = await withTimeout(
-      getBilibiliRanking(options?.rid ?? '0').catch(() => []),
-      apiTimeout,
-      [],
-    )
-    if (ranking.length === 0) rankingFailed = true
-  }
-
-  // 3. 合并 + 去重
-  const merged = dedupByBvid([...ranking, ...popular])
-
-  if (merged.length === 0 && (!options?.existingData || Object.keys(options.existingData).length === 0)) {
-    return null
-  }
-
-  // 4. 批量获取新视频详情（以 existingData 为起点，新数据覆盖同 BVid）
-  const results: VideosDataMap = options?.existingData ? { ...options.existingData } : {}
-  const allFailedBvids: string[] = []
-  const allEmptyPicBvids: string[] = []
-  const allZeroStatBvids: string[] = []
-  const maxResults = Math.min(merged.length, 200)
-
-  for (let i = 0; i < maxResults; i += 5) {
-    const batch = merged.slice(i, i + 5)
-    const { results: batchResults, failedBvids } = await fetchOnlineCountBatch(batch, apiTimeout)
-
-    allFailedBvids.push(...failedBvids)
-
-    for (const item of batchResults) {
-      const video = merged.find((v) => v.bvid === item.bvid)
-      if (!video) continue
-
-      const statView = video.stat?.view || 0
-      const statDanmaku = video.stat?.danmaku || 0
-
-      // 封面链接有效性校验
-      const pic = ensureHttps(video.pic || '')
-      if (!isValidPic(pic)) {
-        allEmptyPicBvids.push(item.bvid)
-      }
-
-      // 播放量校验（排行榜视频不应为 0）
-      if (statView === 0) {
-        allZeroStatBvids.push(item.bvid)
-      }
-
-      results[item.bvid] = {
-        title: video.title || '',
-        owner: video.owner?.name || '',
-        mid: String(video.owner?.mid || ''),
-        pic,
-        online_count: item.onlineCount.formatted,
-        count_num: item.onlineCount.raw,
-        play_count_num: statView,
-        danmaku_count_num: statDanmaku,
-        play_count: formatCount(statView),
-        danmaku_count: formatCount(statDanmaku),
-      }
-    }
-  }
-
-  return {
-    data: results,
-    failedBvids: allFailedBvids,
-    emptyPicBvids: allEmptyPicBvids,
-    zeroStatBvids: allZeroStatBvids,
-    rankingFailed: options?.skipRanking ? false : rankingFailed,
-    popularFailed: options?.skipPopular ? false : popularFailed,
-  }
 }
 
 export async function retryFailedVideos(

@@ -16,6 +16,7 @@ import {
   fetchAllRankingLists,
   fetchOnlineCountForVideos,
   mergePartitionCache,
+  dedupRankingVideos,
   selectOnlineTargets,
   filterStaleOnlineTargets,
   buildVideoInfoFromList,
@@ -403,17 +404,11 @@ export default defineNitroPlugin((nitroApp) => {
         }
       }
 
-      // 全局候选（跨 rid 去重，全站 rid=0 与分区重叠）
-      const rankingCandidates = new Map<string, RankingVideo>()
-      for (const videos of Object.values(perRidVideos)) {
-        for (const video of videos) {
-          rankingCandidates.set(video.bvid, video)
-        }
-      }
-      const rankingList = [...rankingCandidates.values()]
+      // 全局候选（跨 rid 去重，保留较小 rid 的版本：如 0、2 重复保留 0）
+      const rankingList = dedupRankingVideos(perRidVideos)
 
       // 2a. 分区均衡 TOP：15 个非全站分区，每分区弹幕量降序取前 topPerRid 条
-      // （全站 rid=0 不参与——与各分区高度重叠，避免浪费名额；全站视频走轮转/热门）
+      // （与全站 rid=0 重叠的视频已在去重池保留最小 rid 版本）
       const partitionTopBvids = new Set<string>()
       const partitionedTop: RankingVideo[] = []
       for (const rid of NON_TOP_RIDS) {
@@ -429,42 +424,52 @@ export default defineNitroPlugin((nitroApp) => {
         }
       }
 
-      // 基础目标：热门全部 + 分区 TOP
-      const baseTargets: RankingVideo[] = [...lists.popular, ...partitionedTop]
+      // 基础目标：热门全部 + 全站 rid=0 + 分区 TOP（每轮固定刷新）
+      // 按 bvid 去重（先到先得：热门 → rid0 → 分区 TOP），三者高度重叠，
+      // 不去重会导致同一视频重复请求，浪费 500 上限的请求预算
+      const baseTargets: RankingVideo[] = []
+      const baseBvids = new Set<string>()
+      for (const v of [...lists.popular, ...(perRidVideos['0'] || []), ...partitionedTop]) {
+        if (!baseBvids.has(v.bvid)) {
+          baseBvids.add(v.bvid)
+          baseTargets.push(v)
+        }
+      }
       const staleBase = filterStaleOnlineTargets(baseTargets, combinedCache, ONLINE_TTL, now)
 
       // 2b. 轮转动态补齐：预算 = 500 - 基础目标实际需请求数
-      // 轮转候选 = 全局候选 - 分区 TOP（避免重复）
+      // 轮转候选 = 全局候选 - 基础目标 bvid（避免重复拉热门/rid0/分区TOP）
       const rotationBudget = Math.max(0, ONLINE_FETCH_LIMIT - staleBase.length)
       let targets = staleBase
-      const rotationCandidates = rankingList.filter((v) => !partitionTopBvids.has(v.bvid))
+      const rotationCandidates = rankingList.filter((v) => !baseBvids.has(v.bvid))
 
-      if (rotationBudget > 0 && rotationCandidates.length > 0) {
-        // 轮转批次与 TTL 匹配：批次 = ceil(候选 / (TTL ÷ 刷新间隔))
+      // 轮转候选先 TTL 过滤：只对过期/新视频取批次
+      // （若先取批次再过滤，回绕批次里已拉过的视频会占满批次 → 实际请求骤降）
+      const staleRotationCandidates = filterStaleOnlineTargets(
+        rotationCandidates,
+        combinedCache,
+        ONLINE_TTL,
+        now,
+      )
+
+      if (rotationBudget > 0 && staleRotationCandidates.length > 0) {
+        // 轮转批次与 TTL 匹配：批次 = ceil(过滤后候选 / (TTL ÷ 刷新间隔))
         // 轮转周期 = TTL 周期 → 回绕时批次恰好过期 → 每轮稳定请求 ≈ 批次
-        // （批次过大（如 500 vs 候选 1331）→ 2.7 轮覆盖完 → 回绕批次全 TTL 内被过滤 → 请求骤降）
         const rotationCycleRounds = Math.max(1, Math.round(ONLINE_TTL / normalInterval))
         const rotationBatch = Math.max(
           1,
           Math.min(
             rotationBudget,
-            Math.ceil(rotationCandidates.length / rotationCycleRounds),
+            Math.ceil(staleRotationCandidates.length / rotationCycleRounds),
           ),
         )
 
-        const { rotated } = selectOnlineTargets(rotationCandidates, {
+        const { rotated } = selectOnlineTargets(staleRotationCandidates, {
           topCount: 0, // 复用：top 为空，rotated 从全部候选环形取
           rotationBatch,
           rotationIndex: onlineRotationIndex,
         })
-        // 轮转目标同样过滤 TTL（防重复请求已拉过的视频）
-        const staleRotated = filterStaleOnlineTargets(
-          rotated,
-          combinedCache,
-          ONLINE_TTL,
-          now,
-        )
-        targets = [...targets, ...staleRotated]
+        targets = [...targets, ...rotated]
 
         // 选择后立即前进轮转索引（即使后续刷新失败，下一轮也轮转不同批次）
         onlineRotationIndex++

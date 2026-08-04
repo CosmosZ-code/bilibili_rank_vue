@@ -23,9 +23,6 @@ export const VALID_RANKING_RIDS = [
   '234', // 运动
 ] as const
 
-/** 默认 rid（全站排行榜） */
-export const DEFAULT_RID = '0'
-
 /** 全分区组合缓存 Key（合并全部 rid 的结果） */
 export const COMBINED_CACHE_KEY = 'ranking:all'
 
@@ -44,11 +41,6 @@ export const OFF_RANKING_KEEP_THRESHOLD = 500
 /** 生成分区排行榜缓存 Key */
 export function rankingCacheKey(rid: string): string {
   return `ranking:${rid}`
-}
-
-/** 校验 rid 是否为合法分区值 */
-export function isValidRid(rid: unknown): rid is string {
-  return typeof rid === 'string' && (VALID_RANKING_RIDS as readonly string[]).includes(rid)
 }
 
 /** 默认每页条数 */
