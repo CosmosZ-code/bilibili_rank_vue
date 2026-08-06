@@ -1,17 +1,8 @@
 # bilibili_rank_vue
 
-> B站实时在线观看人数排行榜 — Nuxt 重构版
+> B站实时在线观看人数排行榜 — Nuxt
 
-原项目：[bilibili_rank_html](https://github.com/CosmosZ-code/bilibili_rank_html)  
 部署地址：[bilibili.zhyv.net](https://bilibili.zhyv.net/)
-
-## 技术栈
-
-- **框架**: Nuxt 4（Vue 3 Composition API + Nitro 服务端引擎）
-- **样式**: UnoCSS（原子化 CSS）+ CSS Variables（B站色系）
-- **状态管理**: Composables（useRanking / useBanner / useHistory / useFavorites）
-- **服务端**: Nitro — `server/api/` 代理 B站 API
-- **测试**: Vitest + @nuxt/test-utils
 
 ## 快速开始
 
@@ -29,86 +20,6 @@ npm run build
 npm run preview
 ```
 
-## 测试
-
-```bash
-# 运行所有测试
-npm test
-
-# 单元测试（纯逻辑，不依赖 Nuxt 运行时）
-npm run test:unit
-
-# E2E 测试
-npm run test:e2e
-
-# 单次运行
-npm run test:run
-```
-
-## 项目结构
-
-```
-├── app/                       # Nuxt 前端
-│   ├── pages/                 # 页面
-│   ├── components/            # Vue 组件
-│   │   ├── auth/              # 登录组件
-│   │   ├── banner/            # Banner 视差动画
-│   │   ├── ranking/           # 排行榜
-│   │   ├── nav/               # 导航/下拉菜单
-│   │   └── common/            # 通用组件
-│   ├── composables/           # 组合式函数
-│   ├── layouts/               # 布局
-│   ├── assets/css/            # 样式
-│   └── types/                 # TypeScript 类型
-├── server/                    # Nitro 服务端
-│   ├── api/                   # API 路由
-│   │   ├── auth/              # 登录认证
-│   │   ├── ranking/           # 排行榜
-│   │   └── user/              # 用户偏好
-│   ├── db/                    # 数据库层
-│   ├── middleware/             # 服务端中间件
-│   ├── plugins/               # 服务端插件（cache-warmer、banner-warmer）
-│   ├── routes/                # 自定义路由
-│   ├── workers/               # Worker 入口
-│   └── utils/                 # 工具函数
-├── public/                    # 静态资源（含 Banner 图片素材）
-├── test/                      # 测试
-│   ├── unit/                  # 纯逻辑单元测试
-│   ├── nuxt/                  # Nuxt 运行时测试
-│   └── e2e/                   # 端到端测试
-├── .github/workflows/         # CI/CD
-├── Dockerfile                 # Docker 构建
-├── docker-entrypoint.sh       # 容器入口脚本
-├── nuxt.config.ts             # Nuxt 配置
-├── uno.config.ts              # UnoCSS 配置
-└── vitest.config.ts           # 测试配置
-```
-
-## API 端点
-
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/api/health` | GET | 健康检查（Docker HEALTHCHECK） |
-| `/api/ranking` | GET | 实时在线观看人数排行榜（由 cache-warmer 定时刷新） |
-| `/api/ranking/personalized` | GET | 个性化排行推荐 |
-| `/api/ranking/timestamp` | GET | 排行数据时间戳 |
-| `/api/banners` | GET | Banner 数据集（由 banner-warmer 预热，每 7 天从 GitHub 同步新数据） |
-| `/api/history` | GET | 用户观看历史（需 Cookie） |
-| `/api/favorites` | GET | 用户收藏夹（需 Cookie） |
-| `/api/auth/qr` | GET | 获取登录二维码 |
-| `/api/auth/qr-check` | GET | 检查扫码状态 |
-| `/api/auth/user` | GET | 当前登录用户信息 |
-| `/api/auth/logout` | POST | 退出登录 |
-| `/api/user/preferences` | GET / PUT | 用户偏好设置 |
-| `/api/live-rooms` | GET | 直播排行 |
-| `/api/live-areas` | GET | 直播分区列表 |
-
-## Banner 数据
-
-Banner 素材来自 [palxiao/bilibili-banner](https://github.com/palxiao/bilibili-banner) 仓库。`banner-warmer` 插件启动时扫描本地目录写入缓存，之后每 7 天自动从 GitHub 拉取新 Banner。
-
-首次部署时，镜像内置的 Banner 素材会由 entrypoint 脚本自动写入数据目录，确保服务立即可用。
-
 ## 环境变量
 
 | 变量 | 默认值 | 必需 | 说明 |
@@ -116,14 +27,17 @@ Banner 素材来自 [palxiao/bilibili-banner](https://github.com/palxiao/bilibil
 | `NUXT_ENCRYPT_KEY` | `dev-encrypt-key-change-in-production` | ✅ 生产必需 | B站 Cookie AES-256-GCM 加密密钥，生成方式：`openssl rand -hex 32` |
 | `NUXT_API_GUARD_ALLOWED_ORIGINS` | `https://bilibili.zhyv.net` | ✅ 生产必需 | API 跨域白名单，设为你的部署域名（逗号分隔） |
 | `NUXT_DB_PATH` | `./data/bilibili_rank.db` | 可选 | SQLite 数据库文件路径 |
-| `NUXT_CACHE_WARMER_REFRESH_INTERVAL_MS` | `240000`（4 分钟） | 可选 | 排行榜缓存刷新间隔（毫秒） |
+| `NUXT_CACHE_WARMER_REFRESH_INTERVAL_MS` | `300000`（5 分钟） | 可选 | 排行榜缓存刷新间隔（毫秒） |
 | `GITHUB_TOKEN` | — | 可选 | GitHub 个人访问令牌，提升 Banner 同步 API 限流（60→5000 req/h） |
 
 ## 部署
 
 ### Docker（推荐）
 
-镜像地址：[codmosz/bilibili-rank](https://hub.docker.com/r/codmosz/bilibili-rank)
+镜像同时发布到 Docker Hub 与 GHCR：
+
+- Docker Hub：[codmosz/bilibili-rank](https://hub.docker.com/r/codmosz/bilibili-rank)
+- GHCR：`ghcr.io/cosmosz-code/bilibili-rank`
 
 ```bash
 # 生成加密密钥
@@ -167,3 +81,109 @@ docker build -t bilibili-rank .
 npm run build
 node .output/server/index.mjs
 ```
+
+> 生产环境需要配置 `NUXT_ENCRYPT_KEY` 等环境变量，见[环境变量](#环境变量)。
+
+## 测试
+
+```bash
+# 运行所有测试
+npm test
+
+# 单元测试（纯逻辑，不依赖 Nuxt 运行时）
+npm run test:unit
+
+# 需要完整 Nuxt 上下文的测试
+npm run test:nuxt
+
+# E2E 测试（真实服务器）
+npm run test:e2e
+
+# 单次运行
+npm run test:run
+```
+
+## 技术栈
+
+- **框架**: Nuxt 4（Vue 3 Composition API + Nitro 服务端引擎）
+- **样式**: UnoCSS（原子化 CSS，快捷方式 `btn` / `btn-active` / `btn-hover`）+ CSS Variables（B站色系）
+- **状态管理**: Composables — `useVideoList` / `useAuth` / `useBanner` / `useFavorites` / `useHistory` / `useScrollToTop` / `useToast` / `useTouchDevice` / `useTouchDropdown`
+- **数据库**: SQLite（sql.js WASM + Drizzle ORM），存储用户会话、加密 Cookie 与偏好
+- **服务端**: Nitro — `server/api/` 代理 B站 API（WBI 签名 + buvid 设备指纹防风控）
+- **测试**: Vitest（unit / nuxt / e2e 三个 project）+ @nuxt/test-utils
+
+## 项目结构
+
+```
+├── app/                       # Nuxt 前端
+│   ├── pages/                 # 页面（index.vue 单页 + 404）
+│   ├── components/            # Vue 组件
+│   │   ├── auth/              # 扫码登录
+│   │   ├── banner/            # Banner 视差动画
+│   │   ├── ranking/           # 视频/直播网格、控制栏、骨架屏
+│   │   ├── nav/               # 导航/下拉菜单
+│   │   └── common/            # BackToTop、SearchBox、Toast
+│   ├── composables/           # 组合式函数（9 个，见技术栈）
+│   ├── layouts/               # 布局
+│   ├── assets/css/            # 样式
+│   ├── data/                  # Banner 兜底数据
+│   ├── types/                 # TypeScript 类型
+│   └── utils/                 # 客户端工具（缓存、日期）
+├── server/                    # Nitro 服务端
+│   ├── api/                   # API 路由（ranking、live-rooms、auth、user…）
+│   ├── db/                    # SQLite 数据库层（schema + init）
+│   ├── middleware/            # api-guard（跨域白名单）、auth（登录校验）
+│   ├── plugins/               # cache-warmer、banner-warmer、db-init
+│   ├── routes/                # sitemap.xml
+│   └── utils/                 # bilibili 客户端、banner 同步、加解密、mock 数据…
+├── public/                    # 静态资源（favicon、logo、robots.txt）
+├── test/                      # 测试
+│   ├── unit/                  # 纯逻辑单元测试（无 Nuxt、无 DOM）
+│   └── e2e/                   # 端到端测试（真实服务器）
+├── .github/workflows/         # CI/CD（镜像构建）
+├── Dockerfile                 # Docker 构建
+├── docker-entrypoint.sh       # 容器入口脚本
+├── nuxt.config.ts             # Nuxt 配置
+├── uno.config.ts              # UnoCSS 配置
+└── vitest.config.ts           # 测试配置
+```
+
+## API 端点
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/health` | GET | 健康检查（Docker HEALTHCHECK） |
+| `/api/ranking` | GET | 实时在线观看人数排行榜（分页 / sortBy / search / purifyPercent，由 cache-warmer 定时刷新） |
+| `/api/ranking/timestamp` | GET | 排行缓存毫秒时间戳（判断数据是否有更新） |
+| `/api/ranking/personalized` | GET | 登录用户个性化增量视频（5 分钟缓存） |
+| `/api/ranking/personalized-refresh` | POST | 强制刷新个性化缓存，返回增量视频列表 |
+| `/api/banners` | GET | Banner 数据集（由 banner-warmer 预热，每 7 天从 GitHub 同步新数据） |
+| `/api/history` | GET | 用户观看历史（需登录，max / view_at 分页） |
+| `/api/favorites` | GET | 用户收藏夹（需登录，media_id / pn） |
+| `/api/live-rooms` | GET | 直播排行（按在线热度排序，分页 / search / areaId 过滤） |
+| `/api/live-areas` | GET | 直播一级分区列表（1 小时缓存） |
+| `/api/live-rooms/timestamp` | GET | 直播缓存时间戳（支持 areaId） |
+| `/api/auth/qr` | GET | 获取扫码登录二维码 |
+| `/api/auth/qr-check` | GET | 轮询扫码状态，成功后建用户 / 存 Cookie / 建 session |
+| `/api/auth/user` | GET | 当前登录用户信息 |
+| `/api/auth/logout` | POST | 退出登录 |
+| `/api/user/preferences` | GET / PUT | 用户净化阈值偏好（purifyPercent 0–100） |
+
+## 核心机制
+
+- **WBI 签名 + 设备指纹**：大部分 B站接口需要 WBI 签名（混排表 + MD5）；启动时预取 `bili_ticket` / `buvid` 设备指纹，降低风控概率
+- **缓存预热**：`cache-warmer` 启动即预取设备指纹 → 预热排行榜缓存，之后按 `NUXT_CACHE_WARMER_REFRESH_INTERVAL_MS`（默认 5 分钟）定时刷新；排行榜与热门数据独立退避（30s→60s→120s→240s→480s），单 rid 逐分区重试
+- **风控保护**：在线人数轮询每轮 ≤500 请求，失败视频 / 元数据 30 秒后单独重试
+- **数据瘦身**：在线人数 <200 的视频从缓存剔除，避免低热度数据堆积
+- **优雅降级**：B站不可达时返回 mock 数据（`MOCK_RANKING`）；页面路由 `'/'` 使用 SWR 缓存 600 秒
+
+## Banner 数据
+
+Banner 素材来自 [palxiao/bilibili-banner](https://github.com/palxiao/bilibili-banner) 仓库。`banner-warmer` 插件启动时扫描本地目录写入缓存（取最新 5 套），之后每 7 天自动从 GitHub 拉取新 Banner。
+
+首次部署时，镜像内置的 Banner 素材会由 entrypoint 脚本自动写入数据目录，确保服务立即可用。
+
+## 参考项目
+
+- [bilibili-banner](https://github.com/palxiao/bilibili-banner) — Banner 素材数据源
+- [bilibili-online-ranking](https://github.com/nbt0/bilibili-online-ranking) — 在线人数排行思路参考
