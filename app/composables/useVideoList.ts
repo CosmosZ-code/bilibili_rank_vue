@@ -249,8 +249,9 @@ export function useVideoList() {
       if (signature === lastNotifiedSignature) return
       lastNotifiedSignature = signature
 
-      // 通知（数量 = 实际新增数）
-      const titles = actuallyAdded.map((v) => v.title)
+      // 通知（数量 = 实际新增数；标题按在线人数降序，最热门的排最前）
+      const sortedAdded = actuallyAdded.slice().sort(compareByOnlineCount)
+      const titles = sortedAdded.map((v) => v.title)
       const { showToast } = useToast()
       showToast(buildPersonalizedToastMessage(actuallyAdded.length, titles), 'info')
     } catch {
