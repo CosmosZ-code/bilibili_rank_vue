@@ -6,7 +6,11 @@
  */
 import type { VideosDataMap } from '../../app/types'
 import type { AuthUser } from './auth'
-import { fetchPersonalizedOnly, mergePersonalizedPreserved } from './rankingFetcher'
+import {
+  fetchPersonalizedOnly,
+  mergePersonalizedPreserved,
+  filterLowOnlineVideos,
+} from './rankingFetcher'
 import type { PersonalizedCacheEntry } from './rankingFetcher'
 
 /** 缓存 key 前缀 */
@@ -31,17 +35,24 @@ export async function getPersonalizedCache(
 
 /**
  * 写入用户个性化缓存（timestamp 刷新 = TTL 续期）
+ *
+ * 写入前统一剔除在线人数 < MIN_ONLINE_COUNT 的视频（写入边界兜底，
+ * 保证缓存永不包含低在线数据，无论数据来自哪条拉取路径）。
  */
 export async function setPersonalizedCache(
   userId: number,
   entry: { data: VideosDataMap; cids?: Record<string, number> },
 ): Promise<void> {
   await useStorage('cache').setItem(personalizedCacheKey(userId), {
-    data: entry.data,
+    data: filterLowOnlineVideos(entry.data),
     cids: entry.cids,
     timestamp: Date.now(),
   })
 }
+
+/** 在途拉取去重：同用户并发请求复用同一 Promise（防重复请求 B站）
+ *  场景：登录后客户端 refreshPersonalized 与 loadInitial 触发竞态、同账号多标签页并发 */
+const inflightPersonalized = new Map<number, Promise<VideosDataMap | null>>()
 
 /**
  * 获取用户个性化数据（统一缓存策略）
@@ -49,6 +60,7 @@ export async function setPersonalizedCache(
  * - 缓存新鲜（5 分钟内）→ 直接返回缓存（零 B站 请求）
  * - 缓存过期 → 拉取 B站 并写缓存
  * - 拉取失败 → 返回旧缓存（不覆盖），无缓存则返回 null
+ * - 同用户并发调用 → 复用同一在途 Promise，不重复请求
  */
 export async function getOrFetchPersonalized(
   user: AuthUser,
@@ -61,20 +73,32 @@ export async function getOrFetchPersonalized(
     return cached.data
   }
 
-  // 缓存过期 → 重新拉取
-  try {
-    const fresh = await fetchPersonalizedOnly(cookie)
-    if (fresh) {
-      // 合并保留：跌出热门榜但在线人数 ≥ 阈值的视频不被覆盖淘汰，
-      // 用缓存 cid 续拉在线人数并刷新 TTL，直到人数 < 阈值
-      const merged = await mergePersonalizedPreserved(cached, fresh, cookie)
-      await setPersonalizedCache(user.id, merged)
-      return merged.data
-    }
-  } catch {
-    // 拉取失败静默，不覆盖旧缓存
-  }
+  // 已有同用户拉取在途 → 复用，不发起新请求
+  const inflight = inflightPersonalized.get(user.id)
+  if (inflight) return inflight
 
-  // 拉取失败 → 返回旧缓存（若有）
-  return cached?.data ?? null
+  // 缓存过期 → 重新拉取（注册在途，完成后清理）
+  const task = (async (): Promise<VideosDataMap | null> => {
+    try {
+      const fresh = await fetchPersonalizedOnly(cookie)
+      if (fresh) {
+        // 合并保留：跌出热门榜但在线人数 ≥ 阈值的视频不被覆盖淘汰，
+        // 用缓存 cid 续拉在线人数并刷新 TTL，直到人数 < 阈值
+        const merged = await mergePersonalizedPreserved(cached, fresh, cookie)
+        await setPersonalizedCache(user.id, merged)
+        return merged.data
+      }
+    } catch {
+      // 拉取失败静默，不覆盖旧缓存
+    }
+
+    // 拉取失败 → 返回旧缓存（若有）
+    return cached?.data ?? null
+  })()
+  inflightPersonalized.set(user.id, task)
+  try {
+    return await task
+  } finally {
+    inflightPersonalized.delete(user.id)
+  }
 }

@@ -18,6 +18,7 @@ import {
   COMBINED_CACHE_KEY,
   VALID_RANKING_RIDS,
   OFF_RANKING_KEEP_THRESHOLD,
+  MIN_ONLINE_COUNT,
 } from './rankingConstants'
 
 /**
@@ -197,6 +198,27 @@ export function buildVideoInfoFromList(video: RankingVideo): VideoInfo {
 }
 
 /**
+ * 剔除在线人数低于阈值的视频（缓存瘦身）
+ *
+ * count_num < minOnline 的一律移除（含 0：未拉到人数的视频也剔除，
+ * 拉到确认 ≥ 阈值后再重新入缓存）。调用方需同步清理 onlineAt/cids 中对应键。
+ *
+ * @param map - 待过滤的 VideosDataMap
+ * @param minOnline - 保留最低在线人数（默认 MIN_ONLINE_COUNT）
+ */
+export function filterLowOnlineVideos(
+  map: VideosDataMap,
+  minOnline: number = MIN_ONLINE_COUNT,
+): VideosDataMap {
+  const result: VideosDataMap = {}
+  for (const [bvid, info] of Object.entries(map)) {
+    if (info.count_num < minOnline) continue
+    result[bvid] = info
+  }
+  return result
+}
+
+/**
  * 合并分区缓存（防累积核心逻辑）
  *
  * - newList 为底（该分区当前完整排行，覆盖）
@@ -204,6 +226,7 @@ export function buildVideoInfoFromList(video: RankingVideo): VideoInfo {
  * - 离开排行的视频：在线人数 ≥ keepThreshold（默认 1000）才保留
  *   （热门视频可能短暂跌出榜单，保留避免误移除；< 阈值则移除防累积）
  * - 覆盖本轮新拉到的在线人数
+ * - 最终剔除在线人数 < MIN_ONLINE_COUNT 的视频（缓存瘦身）
  * - cids 合并：旧值保留 + 新列表覆盖
  *
  * @param newList - 本轮拉取的完整列表（count_num=0）
@@ -258,6 +281,14 @@ export function mergePartitionCache(
         count_num: info.count_num,
       }
       onlineAt[bvid] = now
+    }
+  }
+
+  // 剔除在线人数 < 阈值的视频（瘦身），并清理其 onlineAt
+  for (const bvid of Object.keys(data)) {
+    if (data[bvid].count_num < MIN_ONLINE_COUNT) {
+      delete data[bvid]
+      delete onlineAt[bvid]
     }
   }
 
@@ -501,7 +532,7 @@ export async function retryFailedVideos(
     return { data: { ...existingData }, stillFailed: [] }
   }
 
-  const mergedData = { ...existingData }
+  let mergedData = { ...existingData }
 
   for (let i = 0; i < validBvids.length; i += 5) {
     const batch = validBvids.slice(i, i + 5)
@@ -523,6 +554,9 @@ export async function retryFailedVideos(
       }
     }
   }
+
+  // 先剔除在线人数 < 阈值的视频（重试恢复后确认过低则移除，分区缓存由下一轮 merge 统一清理）
+  mergedData = filterLowOnlineVideos(mergedData)
 
   return { data: mergedData, stillFailed }
 }
@@ -687,13 +721,15 @@ export async function fetchPersonalizedOnly(
     }
   }
 
-  return { data: results, cids }
+  // 剔除在线人数 < MIN_ONLINE_COUNT 的视频（含 0，瘦身）
+  // 覆盖扫码登录预热等直接消费本函数数据的路径，与 mergePersonalizedPreserved 的过滤幂等
+  return { data: filterLowOnlineVideos(results), cids }
 }
 
 /**
  * 个性化缓存合并（防淘汰核心逻辑，与 mergePartitionCache 同构）
  *
- * - fresh（本轮新增量）为底
+ * - fresh（本轮新增量）为底，先剔除在线人数 < MIN_ONLINE_COUNT 的视频（含未拉到的 0）
  * - 旧缓存中不在 fresh 里的视频（已跌出热门榜增量）：
  *   - 在线人数 ≥ OFF_RANKING_KEEP_THRESHOLD → 保留候选，用缓存 cid 重新拉在线人数：
  *     新值 ≥ 阈值 → 保留并更新在线人数；新值 < 阈值（含 0 / 失败兜底）→ 淘汰
@@ -711,7 +747,8 @@ export async function mergePersonalizedPreserved(
   cookie: string,
 ): Promise<{ data: VideosDataMap; cids: Record<string, number> }> {
   const apiTimeout = 10_000
-  const data: VideosDataMap = { ...fresh.data }
+  // 新增量先剔除在线人数 < 阈值的视频（含未拉到的 0，瘦身）
+  const data: VideosDataMap = filterLowOnlineVideos(fresh.data)
   const cids: Record<string, number> = { ...(previous?.cids || {}), ...fresh.cids }
 
   if (!previous) return { data, cids }

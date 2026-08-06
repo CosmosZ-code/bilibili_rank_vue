@@ -30,10 +30,14 @@ vi.mock('../../server/utils/rankingConstants', () => ({
   POPULAR_CACHE_KEY: 'popular:latest',
   ONLINE_TTL: 15 * 60 * 1000,
   OFF_RANKING_KEEP_THRESHOLD: 500,
+  MIN_ONLINE_COUNT: 200,
 }))
 
 const { mergePersonalizedPreserved, fetchPersonalizedOnly } = await import(
   '../../server/utils/rankingFetcher'
+)
+const { setPersonalizedCache, getOrFetchPersonalized } = await import(
+  '../../server/utils/personalizedCache'
 )
 
 /** 创建测试用的 VideoInfo */
@@ -88,6 +92,20 @@ describe('mergePersonalizedPreserved — 个性化缓存防淘汰合并', () => 
     const result = await mergePersonalizedPreserved(null, fresh, 'cookie')
     expect(result).toEqual(fresh)
     expect(mockGetOnlineCount).not.toHaveBeenCalled()
+  })
+
+  it('fresh 增量中在线人数 < 200 的视频被剔除（含 0）', async () => {
+    const fresh = {
+      data: {
+        BV_low: makeVideo({ count_num: 150 }),
+        BV_zero: makeVideo({ count_num: 0 }),
+        BV_ok: makeVideo({ count_num: 200 }),
+      },
+      cids: { BV_low: 111, BV_zero: 222, BV_ok: 333 },
+    }
+    const result = await mergePersonalizedPreserved(null, fresh, 'cookie')
+    expect(Object.keys(result.data)).toEqual(['BV_ok'])
+    expect(result.cids.BV_low).toBe(111) // cids 保留，供后续轮次复用
   })
 
   it('跌出增量且 ≥500：拉取成功（≥500）→ 保留并更新在线人数', async () => {
@@ -256,5 +274,114 @@ describe('fetchPersonalizedOnly — 增量拉取（含 cids，无 20 条截断�
     const result = await fetchPersonalizedOnly('cookie')
 
     expect(result).toBeNull()
+  })
+
+  it('在线人数 < 200 的增量视频被剔除（含 0，cids 保留）', async () => {
+    setupStorage(null)
+    mockGetPopular.mockResolvedValue([
+      makePopularVideo('BV_low', 111),
+      makePopularVideo('BV_zero', 222),
+      makePopularVideo('BV_ok', 333),
+    ])
+    mockGetOnlineCount
+      .mockResolvedValueOnce({ formatted: '150+', raw: 150 })
+      .mockResolvedValueOnce({ formatted: '0', raw: 0 })
+      .mockResolvedValueOnce({ formatted: '800+', raw: 800 })
+
+    const result = await fetchPersonalizedOnly('cookie')
+
+    expect(result).not.toBeNull()
+    expect(Object.keys(result!.data)).toEqual(['BV_ok'])
+    expect(result!.data.BV_ok.count_num).toBe(800)
+    expect(result!.cids).toEqual({ BV_low: 111, BV_zero: 222, BV_ok: 333 })
+  })
+})
+
+// ============================================================
+// setPersonalizedCache — 写入边界过滤（扫码登录预热等路径兜底）
+// ============================================================
+describe('setPersonalizedCache — 写入时过滤低在线视频', () => {
+  it('写入缓存的数据已剔除 <200 的视频', async () => {
+    const setItem = vi.fn().mockResolvedValue(undefined)
+    ;(globalThis as any).useStorage = () => ({ setItem })
+
+    await setPersonalizedCache(123, {
+      data: {
+        BV_low: makeVideo({ count_num: 150 }),
+        BV_zero: makeVideo({ count_num: 0 }),
+        BV_ok: makeVideo({ count_num: 800 }),
+      },
+    })
+
+    const [key, entry] = setItem.mock.calls[0]
+    expect(key).toBe('personalized:123')
+    expect(Object.keys(entry.data)).toEqual(['BV_ok'])
+  })
+})
+
+// ============================================================
+// getOrFetchPersonalized — 统一缓存策略 + 在途去重
+// ============================================================
+describe('getOrFetchPersonalized — 缓存策略与在途去重', () => {
+  /** stub Nuxt 的 useStorage：getItem 返回给定缓存，setItem 记录调用 */
+  function setupStorage(cachedData: Record<string, unknown> | null) {
+    const setItem = vi.fn().mockResolvedValue(undefined)
+    ;(globalThis as any).useStorage = () => ({
+      getItem: vi.fn().mockResolvedValue(cachedData),
+      setItem,
+    })
+    return { setItem }
+  }
+
+  const user = { id: 123, bilibiliUid: '123', bilibiliUname: '测试', bilibiliFace: null }
+
+  it('缓存新鲜 → 零 B站 请求', async () => {
+    setupStorage({ data: { BV_a: makeVideo({ count_num: 800 }) }, timestamp: Date.now() })
+
+    const result = await getOrFetchPersonalized(user, 'cookie')
+
+    expect(Object.keys(result!)).toEqual(['BV_a'])
+    expect(mockGetPopular).not.toHaveBeenCalled()
+    expect(mockGetOnlineCount).not.toHaveBeenCalled()
+  })
+
+  it('并发调用在途去重：第二个请求复用同一 Promise，B站 仅请求 1 次', async () => {
+    setupStorage(null)
+    mockGetPopular.mockResolvedValue([makePopularVideo('BV_a', 111)])
+
+    // 用 gate 挂起在线人数拉取，让首次 fetch 保持"在途"
+    let resolveOnline!: (v: { formatted: string; raw: number }) => void
+    const onlineGate = new Promise<{ formatted: string; raw: number }>((r) => {
+      resolveOnline = r
+    })
+    mockGetOnlineCount.mockImplementation(() => onlineGate)
+
+    const p1 = getOrFetchPersonalized(user, 'cookie')
+    const p2 = getOrFetchPersonalized(user, 'cookie')
+
+    // 等待首次 fetch 开始（在途挂起），第二个调用应复用而非新发起
+    await vi.waitFor(() => expect(mockGetPopular).toHaveBeenCalledTimes(1))
+
+    resolveOnline({ formatted: '800+', raw: 800 })
+    const [r1, r2] = await Promise.all([p1, p2])
+
+    expect(r1).toEqual(r2)
+    expect(Object.keys(r1!)).toEqual(['BV_a'])
+    expect(mockGetPopular).toHaveBeenCalledTimes(1)
+  })
+
+  it('在途完成后清理：下一次调用可正常重新拉取', async () => {
+    setupStorage(null)
+    mockGetPopular.mockResolvedValue([makePopularVideo('BV_a', 111)])
+    mockGetOnlineCount.mockResolvedValue({ formatted: '800+', raw: 800 })
+
+    const first = await getOrFetchPersonalized(user, 'cookie')
+    expect(Object.keys(first!)).toEqual(['BV_a'])
+    expect(mockGetPopular).toHaveBeenCalledTimes(1)
+
+    // 再次调用（getItem stub 不写入，缓存仍为空）→ 应重新拉取而非复用
+    const second = await getOrFetchPersonalized(user, 'cookie')
+    expect(Object.keys(second!)).toEqual(['BV_a'])
+    expect(mockGetPopular).toHaveBeenCalledTimes(2)
   })
 })

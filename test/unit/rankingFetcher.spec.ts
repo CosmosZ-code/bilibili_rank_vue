@@ -29,6 +29,7 @@ vi.mock('../../server/utils/rankingConstants', () => ({
   POPULAR_CACHE_KEY: 'popular:latest',
   ONLINE_TTL: 15 * 60 * 1000,
   OFF_RANKING_KEEP_THRESHOLD: 500,
+  MIN_ONLINE_COUNT: 200,
 }))
 
 // 动态导入（必须在 vi.mock 之后）
@@ -38,6 +39,7 @@ const {
   fetchAllRankingLists,
   fetchOnlineCountForVideos,
   mergePartitionCache,
+  filterLowOnlineVideos,
   dedupRankingVideos,
   selectOnlineTargets,
   filterStaleOnlineTargets,
@@ -110,14 +112,34 @@ describe('retryFailedVideos — 失败视频重试逻辑', () => {
     expect(result.stillFailed).toEqual([])
   })
 
-  it('重试后 raw=0 的 BVid 出现在 stillFailed 中', async () => {
+  it('重试后 raw=0 的 BVid 出现在 stillFailed 中，且因在线人数 < 阈值被剔除', async () => {
     mockGetOnlineCount.mockResolvedValue({ formatted: '0', raw: 0 })
     const existing: VideosDataMap = {
       BV1xx: makeVideo({ online_count: '0', count_num: 0 }),
     }
     const result = await retryFailedVideos(['BV1xx'], existing)
-    expect(result.data['BV1xx'].count_num).toBe(0)
+    expect(result.data['BV1xx']).toBeUndefined() // count_num=0 < MIN_ONLINE_COUNT → 剔除
     expect(result.stillFailed).toContain('BV1xx')
+  })
+
+  it('重试恢复的在线人数 < 阈值（如 150）→ 从 data 剔除', async () => {
+    mockGetOnlineCount.mockResolvedValue({ formatted: '150+', raw: 150 })
+    const existing: VideosDataMap = {
+      BV1xx: makeVideo({ online_count: '0', count_num: 0 }),
+    }
+    const result = await retryFailedVideos(['BV1xx'], existing)
+    expect(result.data['BV1xx']).toBeUndefined()
+    expect(result.stillFailed).toEqual([])
+  })
+
+  it('重试恢复的在线人数 ≥ 阈值（如 250）→ 保留并更新', async () => {
+    mockGetOnlineCount.mockResolvedValue({ formatted: '250+', raw: 250 })
+    const existing: VideosDataMap = {
+      BV1xx: makeVideo({ online_count: '0', count_num: 0 }),
+    }
+    const result = await retryFailedVideos(['BV1xx'], existing)
+    expect(result.data['BV1xx'].count_num).toBe(250)
+    expect(result.stillFailed).toEqual([])
   })
 
   it('批量重试：部分成功部分失败', async () => {
@@ -130,7 +152,7 @@ describe('retryFailedVideos — 失败视频重试逻辑', () => {
     }
     const result = await retryFailedVideos(['BV1xx', 'BV2yy'], existing)
     expect(result.data['BV1xx'].count_num).toBe(5000)
-    expect(result.data['BV2yy'].count_num).toBe(0)
+    expect(result.data['BV2yy']).toBeUndefined() // 仍失败 → 在线人数 0 < 阈值 → 剔除
     expect(result.stillFailed).toEqual(['BV2yy'])
   })
 
@@ -717,6 +739,58 @@ describe('filterStaleOnlineTargets — 新鲜度过滤', () => {
 })
 
 // ============================================================
+// filterLowOnlineVideos — 低在线人数剔除（缓存瘦身）
+// ============================================================
+describe('filterLowOnlineVideos — 低在线人数剔除', () => {
+  it('保留 count_num ≥ 200 的视频（含边界 200）', () => {
+    const map: VideosDataMap = {
+      BV_200: makeVideo({ count_num: 200 }),
+      BV_big: makeVideo({ count_num: 5000 }),
+    }
+    const result = filterLowOnlineVideos(map)
+    expect(Object.keys(result)).toEqual(['BV_200', 'BV_big'])
+  })
+
+  it('剔除 0 < count_num < 200 的视频', () => {
+    const map: VideosDataMap = {
+      BV_199: makeVideo({ count_num: 199 }),
+      BV_150: makeVideo({ count_num: 150 }),
+      BV_big: makeVideo({ count_num: 5000 }),
+    }
+    const result = filterLowOnlineVideos(map)
+    expect(Object.keys(result)).toEqual(['BV_big'])
+  })
+
+  it('剔除 count_num = 0（在线人数未拉到）的视频', () => {
+    const map: VideosDataMap = {
+      BV_zero: makeVideo({ count_num: 0 }),
+      BV_big: makeVideo({ count_num: 5000 }),
+    }
+    const result = filterLowOnlineVideos(map)
+    expect(Object.keys(result)).toEqual(['BV_big'])
+  })
+
+  it('自定义阈值生效', () => {
+    const map: VideosDataMap = {
+      BV_100: makeVideo({ count_num: 100 }),
+      BV_150: makeVideo({ count_num: 150 }),
+      BV_200: makeVideo({ count_num: 200 }),
+    }
+    const result = filterLowOnlineVideos(map, 150)
+    expect(Object.keys(result)).toEqual(['BV_150', 'BV_200'])
+  })
+
+  it('不修改输入 map（返回新对象）', () => {
+    const map: VideosDataMap = {
+      BV_low: makeVideo({ count_num: 50 }),
+      BV_big: makeVideo({ count_num: 5000 }),
+    }
+    filterLowOnlineVideos(map)
+    expect(Object.keys(map)).toEqual(['BV_low', 'BV_big'])
+  })
+})
+
+// ============================================================
 // mergePartitionCache — 分区缓存合并（防累积）
 // ============================================================
 describe('mergePartitionCache — 分区缓存合并', () => {
@@ -770,11 +844,58 @@ describe('mergePartitionCache — 分区缓存合并', () => {
 
   it('本轮在线人数中不在列表里的视频被忽略', () => {
     const newList = { BV_a: makeVideo({ count_num: 0 }) }
+    const oldCache = {
+      data: { BV_a: makeVideo({ count_num: 500 }) }, // 已有确认在线人数 → 保留
+      timestamp: now - 60_000,
+      onlineAt: { BV_a: now - 60_000 },
+    }
     const newOnline = { BV_ghost: makeVideo({ count_num: 123 }) }
 
-    const result = mergePartitionCache(newList, null, newOnline, now)
+    const result = mergePartitionCache(newList, oldCache, newOnline, now)
 
     expect(Object.keys(result.data)).toEqual(['BV_a'])
+    expect(result.data.BV_ghost).toBeUndefined()
+  })
+
+  it('在线人数 < 阈值（150）→ 从合并结果剔除，onlineAt 同步清理', () => {
+    const newList = { BV_low: makeVideo({ count_num: 0 }) }
+    const oldCache = {
+      data: { BV_low: makeVideo({ count_num: 5000 }) },
+      timestamp: now - 60_000,
+      onlineAt: { BV_low: now - 60_000 },
+    }
+    const newOnline = { BV_low: makeVideo({ count_num: 150, online_count: '150' }) }
+
+    const result = mergePartitionCache(newList, oldCache, newOnline, now)
+
+    expect(result.data.BV_low).toBeUndefined()
+    expect(result.onlineAt.BV_low).toBeUndefined()
+  })
+
+  it('在线人数为 0（未拉到）→ 从合并结果剔除', () => {
+    const newList = { BV_new: makeVideo({ count_num: 0 }) }
+    const oldCache = {
+      data: { BV_new: makeVideo({ count_num: 0 }) },
+      timestamp: now - 60_000,
+      onlineAt: { BV_new: now - 60_000 },
+    }
+
+    const result = mergePartitionCache(newList, oldCache, {}, now)
+
+    expect(result.data.BV_new).toBeUndefined()
+  })
+
+  it('在线人数恰好 200 → 保留', () => {
+    const newList = { BV_ok: makeVideo({ count_num: 0 }) }
+    const oldCache = {
+      data: { BV_ok: makeVideo({ count_num: 200, online_count: '200' }) },
+      timestamp: now - 60_000,
+      onlineAt: { BV_ok: now - 60_000 },
+    }
+
+    const result = mergePartitionCache(newList, oldCache, {}, now)
+
+    expect(result.data.BV_ok.count_num).toBe(200)
   })
 
   it('离开排行但在线人数 ≥ 阈值（500）→ 保留', () => {

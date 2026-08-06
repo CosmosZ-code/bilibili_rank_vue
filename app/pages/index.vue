@@ -213,7 +213,18 @@ const {
   refreshFilter,
   forceRefresh,
   loadMore: vlLoadMore,
+  refreshPersonalized,
 } = useVideoList()
+
+// 登录成功（未登录 → 已登录）→ 立即拉取个性化数据
+if (import.meta.client) {
+  const { user: authUser } = useAuth()
+  watch(authUser, (u, prev) => {
+    if (u?.bilibiliUid && !prev?.bilibiliUid && !vlInitialLoading.value) {
+      refreshPersonalized()
+    }
+  })
+}
 
 // 视频数据时间戳变化 → 更新页脚更新时间
 watch(vlTimestamp, (ts) => {

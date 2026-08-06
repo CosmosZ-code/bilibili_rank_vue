@@ -38,6 +38,9 @@ export const ONLINE_FETCH_LIMIT = 500
 /** 离开排行后保留在线人数的阈值：在线人数 ≥ 此值才保留（防误移除热门视频） */
 export const OFF_RANKING_KEEP_THRESHOLD = 500
 
+/** 缓存保留最低在线人数：少于 200 人的视频从缓存剔除（瘦身，含未拉到的 0） */
+export const MIN_ONLINE_COUNT = 200
+
 /** 生成分区排行榜缓存 Key */
 export function rankingCacheKey(rid: string): string {
   return `ranking:${rid}`

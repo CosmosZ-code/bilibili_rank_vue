@@ -91,6 +91,19 @@ describe('index.vue 页面内容验证', () => {
     expect(content).toContain('vlHasMore')
   })
 
+  it('登录成功（未登录 → 已登录）时立即触发 refreshPersonalized', async () => {
+    const fs = await import('node:fs/promises')
+    const content = await fs.readFile(resolve(rootDir, 'app/pages/index.vue'), 'utf-8')
+
+    // useVideoList 解构中包含 refreshPersonalized
+    expect(content).toContain('refreshPersonalized,')
+
+    // watch 登录状态：过渡到已登录时调用 refreshPersonalized
+    expect(content).toMatch(/watch\(authUser, \(u, prev\)/)
+    expect(content).toContain('!prev?.bilibiliUid')
+    expect(content).toContain('refreshPersonalized()')
+  })
+
   it('视图切换包含时间戳校验逻辑', async () => {
     const fs = await import('node:fs/promises')
     const content = await fs.readFile(resolve(rootDir, 'app/pages/index.vue'), 'utf-8')

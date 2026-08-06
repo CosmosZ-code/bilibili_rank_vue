@@ -5,9 +5,7 @@
  * 登录成功时自动完成用户创建、Cookie 存储、session 创建
  */
 import { pollQrCode } from '../../utils/bilibili'
-import { handleLoginSuccess, getSessionUser } from '../../utils/auth'
-import { fetchPersonalizedOnly } from '../../utils/rankingFetcher'
-import { setPersonalizedCache } from '../../utils/personalizedCache'
+import { handleLoginSuccess } from '../../utils/auth'
 
 export default defineEventHandler(async (event) => {
   const query = getQuery(event)
@@ -37,21 +35,9 @@ export default defineEventHandler(async (event) => {
       path: '/',
     })
 
-    // 后台预热个性化排行榜缓存（异步，不阻塞登录返回）
-    const session = await getSessionUser(sessionId)
-    if (session) {
-      Promise.resolve().then(async () => {
-        try {
-          const data = await fetchPersonalizedOnly(result.cookie!)
-          if (data) {
-            await setPersonalizedCache(session.user.id, data)
-          }
-        } catch {
-          // 预热失败不影响登录
-        }
-      })
-    }
-
+    // 个性化数据不在此后台预热：
+    // 客户端登录成功后由 refreshPersonalized 触发拉取（唯一 fetch 源），
+    // 避免与预热并发导致重复请求 B站（防风控）
     return {
       status: 'success',
       message: '登录成功',

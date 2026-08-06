@@ -20,6 +20,7 @@ import {
   selectOnlineTargets,
   filterStaleOnlineTargets,
   buildVideoInfoFromList,
+  filterLowOnlineVideos,
   retryFailedVideos,
   retryFailedMetadata,
   type PartitionCacheEntry,
@@ -144,6 +145,7 @@ export default defineNitroPlugin((nitroApp) => {
   /**
    * 重建合并视图 ranking:all：热门 + 所有分区缓存合并
    * （排行数据覆盖热门同 bvid；onlineAt 一并合并，供新鲜度判断）
+   * 合并后剔除在线人数 < MIN_ONLINE_COUNT 的视频（瘦身 + 清理历史缓存存量数据）
    */
   async function rebuildCombinedCache(): Promise<void> {
     const merged: VideosDataMap = {}
@@ -163,8 +165,14 @@ export default defineNitroPlugin((nitroApp) => {
       }
     }
 
+    // 剔除在线人数 < 阈值的视频，并同步清理其 onlineAt
+    const filteredData = filterLowOnlineVideos(merged)
+    for (const bvid of Object.keys(onlineAt)) {
+      if (!filteredData[bvid]) delete onlineAt[bvid]
+    }
+
     await useStorage('cache').setItem(cacheKey, {
-      data: merged,
+      data: filteredData,
       timestamp: Date.now(),
       onlineAt,
     } satisfies PartitionCacheEntry)
