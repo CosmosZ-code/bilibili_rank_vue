@@ -30,6 +30,7 @@ vi.mock('../../server/utils/rankingConstants', () => ({
   POPULAR_CACHE_KEY: 'popular:latest',
   ONLINE_TTL: 15 * 60 * 1000,
   OFF_RANKING_KEEP_THRESHOLD: 500,
+  OFF_RANKING_RETAIN_TTL: 6 * 60 * 60 * 1000,
   MIN_ONLINE_COUNT: 200,
 }))
 

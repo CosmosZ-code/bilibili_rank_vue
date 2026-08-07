@@ -29,6 +29,7 @@ vi.mock('../../server/utils/rankingConstants', () => ({
   POPULAR_CACHE_KEY: 'popular:latest',
   ONLINE_TTL: 15 * 60 * 1000,
   OFF_RANKING_KEEP_THRESHOLD: 500,
+  OFF_RANKING_RETAIN_TTL: 6 * 60 * 60 * 1000,
   MIN_ONLINE_COUNT: 200,
 }))
 
@@ -165,6 +166,24 @@ describe('retryFailedVideos — 失败视频重试逻辑', () => {
     expect(result.data).not.toBe(existing)
     expect(existing['BV1xx'].count_num).toBe(0)
     expect(result.data['BV1xx'].count_num).toBe(3000)
+  })
+
+  it('传入 cids 时以真实 cid 请求在线人数', async () => {
+    mockGetOnlineCount.mockResolvedValue({ formatted: '3000+', raw: 3000 })
+    const existing: VideosDataMap = {
+      BV1xx: makeVideo({ online_count: '0', count_num: 0 }),
+    }
+    await retryFailedVideos(['BV1xx'], existing, { BV1xx: 12345 })
+    expect(mockGetOnlineCount).toHaveBeenCalledWith('BV1xx', '12345')
+  })
+
+  it('未传 cids 时回退 cid=0（调用方负责限制重试次数）', async () => {
+    mockGetOnlineCount.mockResolvedValue({ formatted: '3000+', raw: 3000 })
+    const existing: VideosDataMap = {
+      BV1xx: makeVideo({ online_count: '0', count_num: 0 }),
+    }
+    await retryFailedVideos(['BV1xx'], existing)
+    expect(mockGetOnlineCount).toHaveBeenCalledWith('BV1xx', '0')
   })
 })
 
@@ -946,6 +965,93 @@ describe('mergePartitionCache — 分区缓存合并', () => {
     const result = mergePartitionCache(newList, oldCache, {}, now, 2000)
 
     expect(result.data.BV_mid).toBeUndefined()
+  })
+
+  it('离开排行保留条目超过保留期限（TTL 兜底）→ 淘汰', () => {
+    const newList = { BV_new: makeVideo({ count_num: 0 }) }
+    const oldCache = {
+      data: {
+        BV_hot: makeVideo({ count_num: 5000, online_count: '5000+' }),
+        BV_new: makeVideo({ count_num: 0 }),
+      },
+      timestamp: now - 60_000,
+      onlineAt: { BV_hot: now - 7 * 60 * 60 * 1000, BV_new: now - 60_000 }, // 7h 前刷新，超过 6h TTL
+    }
+
+    const result = mergePartitionCache(newList, oldCache, {}, now)
+
+    expect(result.data.BV_hot).toBeUndefined()
+    expect(result.onlineAt.BV_hot).toBeUndefined()
+  })
+
+  it('离开排行保留条目在保留期限内 → 保留', () => {
+    const newList = { BV_new: makeVideo({ count_num: 0 }) }
+    const oldCache = {
+      data: {
+        BV_hot: makeVideo({ count_num: 5000, online_count: '5000+' }),
+        BV_new: makeVideo({ count_num: 0 }),
+      },
+      timestamp: now - 60_000,
+      onlineAt: { BV_hot: now - 60_000, BV_new: now - 60_000 },
+    }
+
+    const result = mergePartitionCache(newList, oldCache, {}, now)
+
+    expect(result.data.BV_hot).toBeDefined()
+  })
+
+  it('保留条目被轮转刷新（新值 ≥ 阈值）→ 更新数据并续期 onlineAt', () => {
+    const newList = { BV_new: makeVideo({ count_num: 0 }) }
+    const oldCache = {
+      data: {
+        BV_hot: makeVideo({ count_num: 5000, online_count: '5000+' }),
+        BV_new: makeVideo({ count_num: 0 }),
+      },
+      timestamp: now - 60_000,
+      onlineAt: { BV_hot: now - 60_000, BV_new: now - 60_000 },
+    }
+    const newOnline = { BV_hot: makeVideo({ count_num: 8000, online_count: '8000+' }) }
+
+    const result = mergePartitionCache(newList, oldCache, newOnline, now)
+
+    expect(result.data.BV_hot.count_num).toBe(8000)
+    expect(result.onlineAt.BV_hot).toBe(now)
+  })
+
+  it('保留条目被轮转刷新（0 < 新值 < 阈值）→ 淘汰（热度消退）', () => {
+    const newList = { BV_new: makeVideo({ count_num: 0 }) }
+    const oldCache = {
+      data: {
+        BV_hot: makeVideo({ count_num: 5000, online_count: '5000+' }),
+        BV_new: makeVideo({ count_num: 0 }),
+      },
+      timestamp: now - 60_000,
+      onlineAt: { BV_hot: now - 60_000, BV_new: now - 60_000 },
+    }
+    const newOnline = { BV_hot: makeVideo({ count_num: 300, online_count: '300' }) }
+
+    const result = mergePartitionCache(newList, oldCache, newOnline, now)
+
+    expect(result.data.BV_hot).toBeUndefined()
+    expect(result.onlineAt.BV_hot).toBeUndefined()
+  })
+
+  it('保留条目刷新 raw=0（拉取失败）→ 保留旧值 + 旧 onlineAt（保持 stale 待重试）', () => {
+    const newList = { BV_new: makeVideo({ count_num: 0 }) }
+    const oldCache = {
+      data: {
+        BV_hot: makeVideo({ count_num: 5000, online_count: '5000+' }),
+        BV_new: makeVideo({ count_num: 0 }),
+      },
+      timestamp: now - 60_000,
+      onlineAt: { BV_hot: now - 60_000, BV_new: now - 60_000 },
+    }
+    const newOnline = { BV_hot: makeVideo({ count_num: 0, online_count: '0' }) }
+
+    const result = mergePartitionCache(newList, oldCache, newOnline, now)
+
+    expect(result.data.BV_hot.count_num).toBe(5000)
+    expect(result.onlineAt.BV_hot).toBe(now - 60_000)
   })
 
   it('cids 合并：旧值保留 + 新列表覆盖', () => {

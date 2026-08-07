@@ -56,6 +56,8 @@ export default defineNitroPlugin((nitroApp) => {
   const NON_TOP_RIDS = VALID_RANKING_RIDS.filter((r) => r !== '0')
   // 每分区列表上限 100 条（B站接口约束，与 rid 无关），topPerRid = 200/15 = 13 条/分区
   const topPerRid = Math.floor(RANKING_TOP_TOTAL / NON_TOP_RIDS.length) // 200/15 = 13 条/分区
+  // 保留条目每轮参与轮转的上限（弹幕量降序取前 N，防止长期累积挤占轮转预算）
+  const RETAINED_ROTATION_LIMIT = 100
   // 轮转索引（模块级状态，逐轮递增；轮转批次由「500 - 基础目标需请求数」动态补齐）
   let onlineRotationIndex = 0
 
@@ -146,15 +148,18 @@ export default defineNitroPlugin((nitroApp) => {
    * 重建合并视图 ranking:all：热门 + 所有分区缓存合并
    * （排行数据覆盖热门同 bvid；onlineAt 一并合并，供新鲜度判断）
    * 合并后剔除在线人数 < MIN_ONLINE_COUNT 的视频（瘦身 + 清理历史缓存存量数据）
+   * cids 一并合并（失败视频/保留条目重试在线人数时必需）
    */
   async function rebuildCombinedCache(): Promise<void> {
     const merged: VideosDataMap = {}
     const onlineAt: Record<string, number> = {}
+    const cids: Record<string, number> = {}
 
     const popular = await useStorage('cache').getItem<PartitionCacheEntry>(POPULAR_CACHE_KEY)
     if (popular?.data) {
       Object.assign(merged, popular.data)
       Object.assign(onlineAt, popular.onlineAt || {})
+      Object.assign(cids, popular.cids || {})
     }
 
     for (const rid of VALID_RANKING_RIDS) {
@@ -162,34 +167,63 @@ export default defineNitroPlugin((nitroApp) => {
       if (partition?.data) {
         Object.assign(merged, partition.data)
         Object.assign(onlineAt, partition.onlineAt || {})
+        Object.assign(cids, partition.cids || {})
       }
     }
 
-    // 剔除在线人数 < 阈值的视频，并同步清理其 onlineAt
+    // 剔除在线人数 < 阈值的视频，并同步清理其 onlineAt / cids
     const filteredData = filterLowOnlineVideos(merged)
     for (const bvid of Object.keys(onlineAt)) {
       if (!filteredData[bvid]) delete onlineAt[bvid]
+    }
+    for (const bvid of Object.keys(cids)) {
+      if (!filteredData[bvid]) delete cids[bvid]
     }
 
     await useStorage('cache').setItem(cacheKey, {
       data: filteredData,
       timestamp: Date.now(),
       onlineAt,
+      cids,
     } satisfies PartitionCacheEntry)
   }
 
   /**
-   * 从本轮在线人数数据中筛选属于指定列表的条目（跨 rid 重叠视频会更新多个分区）
+   * 从分区缓存构建保留条目轮转候选
+   *
+   * 保留条目 = 跌出榜单但在线人数仍 ≥ 阈值的视频（mergePartitionCache 保留）。
+   * 它们不在当前任何列表里，若不加入候选池则在线人数永久冻结。
+   * 用分区缓存的 cids 拉取真实在线人数：刷新后仍 ≥ 阈值续期，< 阈值由
+   * mergePartitionCache 淘汰；跨 rid 去重，弹幕量降序取前 RETAINED_ROTATION_LIMIT 条。
+   *
+   * @param excludeBvids - 需排除的 bvid（当前列表 + 基础目标，避免重复请求）
    */
-  function filterOnlineByList(
-    onlineData: VideosDataMap,
-    list: VideosDataMap,
-  ): VideosDataMap {
-    const result: VideosDataMap = {}
-    for (const [bvid, info] of Object.entries(onlineData)) {
-      if (list[bvid]) result[bvid] = info
+  async function buildRetainedRotationCandidates(excludeBvids: Set<string>): Promise<RankingVideo[]> {
+    const seen = new Set<string>()
+    const candidates: RankingVideo[] = []
+
+    for (const rid of VALID_RANKING_RIDS) {
+      const partition = await getPartitionCache(rid)
+      if (!partition?.data || !partition.cids) continue
+      for (const [bvid, info] of Object.entries(partition.data)) {
+        if (excludeBvids.has(bvid) || seen.has(bvid)) continue
+        const cid = partition.cids[bvid]
+        if (!cid) continue
+        seen.add(bvid)
+        candidates.push({
+          bvid,
+          cid,
+          title: info.title,
+          pic: info.pic,
+          owner: { name: info.owner, mid: Number(info.mid) || 0 },
+          stat: { view: info.play_count_num, danmaku: info.danmaku_count_num },
+        })
+      }
     }
-    return result
+
+    // 弹幕量降序取前 N 条（保留条目曾是热门，用旧弹幕量排序优先级合理）
+    candidates.sort((a, b) => (b.stat?.danmaku || 0) - (a.stat?.danmaku || 0))
+    return candidates.slice(0, RETAINED_ROTATION_LIMIT)
   }
 
   /**
@@ -342,6 +376,10 @@ export default defineNitroPlugin((nitroApp) => {
   let retryTimer: ReturnType<typeof setTimeout> | null = null
   // 元数据重试计时器
   let metadataRetryTimer: ReturnType<typeof setTimeout> | null = null
+  // 连续重试计数（达到上限停止自动重试，等待下一轮完整刷新自然重试；新失败批次时重置）
+  let retryFailedAttempts = 0
+  let metadataRetryAttempts = 0
+  const MAX_RETRY_ATTEMPTS = 3
 
   /**
    * 安排下一次完整刷新
@@ -451,6 +489,12 @@ export default defineNitroPlugin((nitroApp) => {
       let targets = staleBase
       const rotationCandidates = rankingList.filter((v) => !baseBvids.has(v.bvid))
 
+      // 补充保留条目（跌出榜单但仍 ≥ 阈值的视频，用缓存 cid 续期刷新，
+      // 防止其在线人数长期冻结；刷新结果经 mergePartitionCache 回写分区缓存）
+      const excludeBvids = new Set<string>(baseBvids)
+      for (const v of rankingList) excludeBvids.add(v.bvid)
+      rotationCandidates.push(...(await buildRetainedRotationCandidates(excludeBvids)))
+
       // 轮转候选先 TTL 过滤：只对过期/新视频取批次
       // （若先取批次再过滤，回绕批次里已拉过的视频会占满批次 → 实际请求骤降）
       const staleRotationCandidates = filterStaleOnlineTargets(
@@ -510,10 +554,10 @@ export default defineNitroPlugin((nitroApp) => {
       if (!rankingState.inBackoff) {
         // 成功拉到的 rid：写分区缓存
         for (const [rid, videos] of Object.entries(lists.perRid)) {
-          // 构建该分区完整列表（count_num=0）+ 命中本轮在线人数 + cids
+          // 构建该分区完整列表（count_num=0）+ 本轮在线人数（完整传入，
+          // mergePartitionCache 只覆盖 data 中存在的 bvid，保留条目刷新值借此回写）+ cids
           const newList = buildMapFromVideos(videos)
-          const newOnline = filterOnlineByList(onlineData, newList)
-          await writePartitionCache(rid, newList, newOnline, buildCidsFromVideos(videos))
+          await writePartitionCache(rid, newList, onlineData, buildCidsFromVideos(videos))
         }
 
         if (lists.failedRid) {
@@ -543,9 +587,8 @@ export default defineNitroPlugin((nitroApp) => {
       if (!popularState.inBackoff) {
         if (lists.popular.length > 0) {
           const popularList = buildMapFromVideos(lists.popular)
-          const popularOnline = filterOnlineByList(onlineData, popularList)
           const oldCache = await useStorage('cache').getItem<PartitionCacheEntry>(POPULAR_CACHE_KEY)
-          const entry = mergePartitionCache(popularList, oldCache, popularOnline)
+          const entry = mergePartitionCache(popularList, oldCache, onlineData)
           entry.cids = { ...(oldCache?.cids || {}), ...buildCidsFromVideos(lists.popular) }
           await useStorage('cache').setItem(POPULAR_CACHE_KEY, entry)
         } else if (lists.popularFailed) {
@@ -598,17 +641,20 @@ export default defineNitroPlugin((nitroApp) => {
       // 8. 失败视频 / 元数据重试安排
       if (allFailedBvids.length > 0) {
         pendingRetryBvids = allFailedBvids
+        retryFailedAttempts = 0
         console.warn(
           `[cache-warmer] ${allFailedBvids.length} 个视频在线人数获取失败，将独立重试`,
         )
         scheduleRetryFailedVideos(30_000)
       } else {
         pendingRetryBvids = []
+        retryFailedAttempts = 0
       }
 
       if (allEmptyPicBvids.length > 0 || allZeroStatBvids.length > 0) {
         pendingEmptyPicBvids = allEmptyPicBvids
         pendingZeroStatBvids = allZeroStatBvids
+        metadataRetryAttempts = 0
         console.warn(
           `[cache-warmer] 元数据异常: ${allEmptyPicBvids.length} 个封面为空, ${allZeroStatBvids.length} 个播放量为0，将独立重试`,
         )
@@ -616,6 +662,7 @@ export default defineNitroPlugin((nitroApp) => {
       } else {
         pendingEmptyPicBvids = []
         pendingZeroStatBvids = []
+        metadataRetryAttempts = 0
       }
     } catch (err: any) {
       console.error('[cache-warmer] 刷新异常:', err.message || err, err.stack)
@@ -639,14 +686,18 @@ export default defineNitroPlugin((nitroApp) => {
 
       console.log(`[cache-warmer] 重试 ${pendingRetryBvids.length} 个失败视频的在线人数...`)
 
-      const result = await retryFailedVideos(pendingRetryBvids, cached.data)
+      const result = await retryFailedVideos(
+        pendingRetryBvids,
+        cached.data,
+        (cached as PartitionCacheEntry).cids,
+      )
 
       const recoveredBvids = pendingRetryBvids.filter(
         (b) => !result.stillFailed.includes(b),
       )
 
       if (recoveredBvids.length > 0) {
-        // 更新合并视图（保留 onlineAt，恢复的 bvid 刷新时间戳）
+        // 更新合并视图（保留 onlineAt / cids，恢复的 bvid 刷新时间戳）
         await useStorage('cache').setItem(cacheKey, {
           data: result.data,
           timestamp: Date.now(),
@@ -654,6 +705,7 @@ export default defineNitroPlugin((nitroApp) => {
             ...(cached as PartitionCacheEntry).onlineAt,
             ...Object.fromEntries(recoveredBvids.map((b) => [b, Date.now()])),
           },
+          cids: (cached as PartitionCacheEntry).cids,
         } satisfies PartitionCacheEntry)
 
         // 回写分区缓存（防 rebuild 覆盖）
@@ -666,9 +718,18 @@ export default defineNitroPlugin((nitroApp) => {
 
       pendingRetryBvids = result.stillFailed
 
-      // 如果还有失败视频，继续重试
+      // 如果还有失败视频，继续重试（上限内；达到上限停止，等待主刷新自然重试）
       if (pendingRetryBvids.length > 0) {
-        scheduleRetryFailedVideos(30_000)
+        retryFailedAttempts++
+        if (retryFailedAttempts >= MAX_RETRY_ATTEMPTS) {
+          console.warn(
+            `[cache-warmer] 失败视频重试达上限（${MAX_RETRY_ATTEMPTS} 次），停止自动重试，等待下一轮完整刷新`,
+          )
+          pendingRetryBvids = []
+          retryFailedAttempts = 0
+        } else {
+          scheduleRetryFailedVideos(30_000)
+        }
       }
     } catch (err: any) {
       console.error('[cache-warmer] 重试失败视频异常:', err.message || err)
@@ -709,7 +770,7 @@ export default defineNitroPlugin((nitroApp) => {
           ...pendingZeroStatBvids.filter((b) => !result.stillZeroStat.includes(b)),
         ]
 
-        // 有恢复，更新合并视图（保留 onlineAt）+ 回写分区缓存（防 rebuild 覆盖）
+        // 有恢复，更新合并视图（保留 onlineAt / cids）+ 回写分区缓存（防 rebuild 覆盖）
         await useStorage('cache').setItem(cacheKey, {
           data: result.data,
           timestamp: Date.now(),
@@ -717,6 +778,7 @@ export default defineNitroPlugin((nitroApp) => {
             ...(cached as PartitionCacheEntry).onlineAt,
             ...Object.fromEntries(recoveredBvids.map((b) => [b, Date.now()])),
           },
+          cids: (cached as PartitionCacheEntry).cids,
         } satisfies PartitionCacheEntry)
 
         await syncRecoveredToPartitions(result.data, recoveredBvids)
@@ -730,9 +792,19 @@ export default defineNitroPlugin((nitroApp) => {
       pendingEmptyPicBvids = result.stillEmptyPic
       pendingZeroStatBvids = result.stillZeroStat
 
-      // 如果还有失败，继续重试
+      // 如果还有失败，继续重试（上限内；达到上限停止，等待主刷新自然重试）
       if (pendingEmptyPicBvids.length > 0 || pendingZeroStatBvids.length > 0) {
-        scheduleRetryMetadata(30_000)
+        metadataRetryAttempts++
+        if (metadataRetryAttempts >= MAX_RETRY_ATTEMPTS) {
+          console.warn(
+            `[cache-warmer] 元数据重试达上限（${MAX_RETRY_ATTEMPTS} 次），停止自动重试，等待下一轮完整刷新`,
+          )
+          pendingEmptyPicBvids = []
+          pendingZeroStatBvids = []
+          metadataRetryAttempts = 0
+        } else {
+          scheduleRetryMetadata(30_000)
+        }
       }
     } catch (err: any) {
       console.error('[cache-warmer] 重试元数据异常:', err.message || err)

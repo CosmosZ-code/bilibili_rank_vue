@@ -18,6 +18,7 @@ import {
   COMBINED_CACHE_KEY,
   VALID_RANKING_RIDS,
   OFF_RANKING_KEEP_THRESHOLD,
+  OFF_RANKING_RETAIN_TTL,
   MIN_ONLINE_COUNT,
 } from './rankingConstants'
 
@@ -229,11 +230,19 @@ export function filterLowOnlineVideos(
  * - 最终剔除在线人数 < MIN_ONLINE_COUNT 的视频（缓存瘦身）
  * - cids 合并：旧值保留 + 新列表覆盖
  *
+ * 离开排行保留条目的生命周期（防冻结核心逻辑）：
+ * - 保留期限：onlineAt 超过 retainTtl 未刷新 → 强制淘汰（TTL 兜底）
+ * - 轮转刷新（newOnline 覆盖，不在 newList 中的条目）：
+ *   - 新值 ≥ keepThreshold → 更新数据并续期 onlineAt
+ *   - 新值 ∈ (0, keepThreshold) → 热度消退，淘汰
+ *   - 新值 = 0（拉取失败/接口错误）→ 保留旧值 + 旧 onlineAt（保持 stale 待重试，不误删）
+ *
  * @param newList - 本轮拉取的完整列表（count_num=0）
  * @param oldCache - 旧分区缓存（可能为 null）
- * @param newOnline - 本轮拉到的在线人数数据
+ * @param newOnline - 本轮拉到的在线人数数据（含保留条目的刷新值）
  * @param now - 当前时间戳
- * @param keepThreshold - 离开排行保留阈值（默认 1000）
+ * @param keepThreshold - 离开排行保留阈值（默认 500）
+ * @param retainTtl - 离开排行保留期限（默认 OFF_RANKING_RETAIN_TTL）
  */
 export function mergePartitionCache(
   newList: VideosDataMap,
@@ -241,6 +250,7 @@ export function mergePartitionCache(
   newOnline: VideosDataMap,
   now: number = Date.now(),
   keepThreshold: number = OFF_RANKING_KEEP_THRESHOLD,
+  retainTtl: number = OFF_RANKING_RETAIN_TTL,
 ): PartitionCacheEntry {
   const data: VideosDataMap = { ...newList }
   const onlineAt: Record<string, number> = {}
@@ -261,20 +271,31 @@ export function mergePartitionCache(
             onlineAt[bvid] = oldCache.onlineAt[bvid]
           }
         }
-      } else if (info.count_num >= keepThreshold) {
-        // 离开排行但在线人数 ≥ 阈值：保留（热门视频可能短暂跌出榜单）
+      } else if (
+        info.count_num >= keepThreshold &&
+        (!oldCache.onlineAt[bvid] || now - oldCache.onlineAt[bvid] < retainTtl)
+      ) {
+        // 离开排行但在线人数 ≥ 阈值且未超过保留期限：保留（热门视频可能短暂跌出榜单）
         data[bvid] = info
         if (oldCache.onlineAt[bvid]) {
           onlineAt[bvid] = oldCache.onlineAt[bvid]
         }
       }
-      // 离开排行且在线人数 < 阈值 → 移除（不进入 data，防累积）
+      // 离开排行且（在线人数 < 阈值 或 超过保留期限）→ 移除（不进入 data，防累积）
     }
   }
 
   // 本轮新拉的在线人数覆盖
   for (const [bvid, info] of Object.entries(newOnline)) {
     if (data[bvid]) {
+      // 保留条目（不在本轮列表中）：刷新后低于保留阈值 → 淘汰
+      // raw=0（拉取失败）→ 保留旧值（不覆盖、不续期，保持 stale 待下轮重试）
+      if (!newList[bvid] && info.count_num < keepThreshold) {
+        if (info.count_num === 0) continue
+        delete data[bvid]
+        delete onlineAt[bvid]
+        continue
+      }
       data[bvid] = {
         ...data[bvid],
         online_count: info.online_count,
@@ -520,9 +541,17 @@ export async function fetchOnlineCountForVideos(
   return { data, failedBvids }
 }
 
+/**
+ * 重试失败视频的在线人数
+ *
+ * @param failedBvids - 失败视频 BV 号列表
+ * @param existingData - 当前缓存中的完整数据
+ * @param cids - bvid → cid 映射（在线人数接口必需；缺失时回退 cid=0，请求会失败，由调用方限制重试次数）
+ */
 export async function retryFailedVideos(
   failedBvids: string[],
   existingData: VideosDataMap,
+  cids?: Record<string, number>,
 ): Promise<RetryResult> {
   const apiTimeout = 10_000
   const stillFailed: string[] = []
@@ -536,7 +565,7 @@ export async function retryFailedVideos(
 
   for (let i = 0; i < validBvids.length; i += 5) {
     const batch = validBvids.slice(i, i + 5)
-    const batchVideos = batch.map((bvid) => ({ bvid, cid: 0 }))
+    const batchVideos = batch.map((bvid) => ({ bvid, cid: cids?.[bvid] ?? 0 }))
     const { results: batchResults, failedBvids: batchFailed } = await fetchOnlineCountBatch(
       batchVideos,
       apiTimeout,
