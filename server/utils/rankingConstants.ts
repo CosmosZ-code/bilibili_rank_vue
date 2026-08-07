@@ -39,6 +39,21 @@ export const ONLINE_FETCH_LIMIT = 500
 export const OFF_RANKING_KEEP_THRESHOLD = 500
 
 /**
+ * 在线人数批量请求：批间基础延迟（毫秒）
+ *
+ * 每批 5 并发，批间加入随机延迟（见 ONLINE_BATCH_DELAY_JITTER_MS），
+ * 避免短时间同 IP 高频请求触发 B站风控（v_voucher 文档：同接口短时间内
+ * 被同一用户/IP/UA 多次请求会触发 -352）。
+ */
+export const ONLINE_BATCH_DELAY_MS = 250
+
+/** 在线人数批量请求：批间延迟随机抖动上限（毫秒），固定间隔 + 抖动防规律性风控 */
+export const ONLINE_BATCH_DELAY_JITTER_MS = 150
+
+/** 元数据重试（/x/web-interface/view 串行请求）间隔基础值（毫秒），该接口批量请求会被 B站封锁 */
+export const METADATA_RETRY_DELAY_MS = 300
+
+/**
  * 离开排行保留条目的最长保鲜期（TTL 兜底）
  *
  * 保留条目参与轮转刷新（在线人数 ≥ 阈值时每轮续期，onlineAt 更新），

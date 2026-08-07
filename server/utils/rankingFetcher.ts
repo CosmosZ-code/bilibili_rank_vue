@@ -20,6 +20,9 @@ import {
   OFF_RANKING_KEEP_THRESHOLD,
   OFF_RANKING_RETAIN_TTL,
   MIN_ONLINE_COUNT,
+  ONLINE_BATCH_DELAY_MS,
+  ONLINE_BATCH_DELAY_JITTER_MS,
+  METADATA_RETRY_DELAY_MS,
 } from './rankingConstants'
 
 /**
@@ -102,6 +105,21 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
         resolve(fallback)
       })
   })
+}
+
+/**
+ * 批间随机延迟：基础间隔 + 抖动
+ *
+ * 固定间隔会形成规律性请求模式，更容易被 B站 风控识别；
+ * 在基础值上叠加随机抖动模拟真实用户节奏。默认用于在线人数
+ * 批量请求（每批 5 并发），也可传入自定义基础值（如 /view 串行重试）。
+ */
+function batchDelay(
+  ms: number = ONLINE_BATCH_DELAY_MS,
+  jitter: number = ONLINE_BATCH_DELAY_JITTER_MS,
+): Promise<void> {
+  const delay = ms + Math.floor(Math.random() * (jitter + 1))
+  return new Promise((resolve) => setTimeout(resolve, delay))
 }
 
 /** 校验封面链接是否有效 */
@@ -536,6 +554,11 @@ export async function fetchOnlineCountForVideos(
         count_num: item.onlineCount.raw,
       }
     }
+
+    // 批间随机延迟（防风控：同接口短时间高频请求会触发 -352）
+    if (i + 5 < videos.length) {
+      await batchDelay()
+    }
   }
 
   return { data, failedBvids }
@@ -581,6 +604,11 @@ export async function retryFailedVideos(
           count_num: item.onlineCount.raw,
         }
       }
+    }
+
+    // 批间随机延迟（防风控：同接口短时间高频请求会触发 -352）
+    if (i + 5 < validBvids.length) {
+      await batchDelay()
     }
   }
 
@@ -675,6 +703,11 @@ export async function retryFailedMetadata(
       if (emptyPicBvids.includes(bvid)) stillEmptyPic.push(bvid)
       if (zeroStatBvids.includes(bvid)) stillZeroStat.push(bvid)
     }
+
+    // 请求间隔（/x/web-interface/view 批量请求会被 B站封锁，串行也要限速）
+    if (bvid !== validBvids[validBvids.length - 1]) {
+      await batchDelay(METADATA_RETRY_DELAY_MS, 200)
+    }
   }
 
   return { data: mergedData, stillEmptyPic, stillZeroStat }
@@ -748,6 +781,11 @@ export async function fetchPersonalizedOnly(
       }
       cids[item.bvid] = video.cid
     }
+
+    // 批间随机延迟（防风控：同接口短时间高频请求会触发 -352）
+    if (i + 5 < newVideos.length) {
+      await batchDelay()
+    }
   }
 
   // 剔除在线人数 < MIN_ONLINE_COUNT 的视频（含 0，瘦身）
@@ -802,6 +840,11 @@ export async function mergePersonalizedPreserved(
     const { results } = await fetchOnlineCountBatch(batch, apiTimeout)
     for (const r of results) {
       onlineByBvid.set(r.bvid, r.onlineCount)
+    }
+
+    // 批间随机延迟（防风控：同接口短时间高频请求会触发 -352）
+    if (i + 5 < withCid.length) {
+      await batchDelay()
     }
   }
 

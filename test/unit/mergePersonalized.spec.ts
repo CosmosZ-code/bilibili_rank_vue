@@ -32,6 +32,9 @@ vi.mock('../../server/utils/rankingConstants', () => ({
   OFF_RANKING_KEEP_THRESHOLD: 500,
   OFF_RANKING_RETAIN_TTL: 6 * 60 * 60 * 1000,
   MIN_ONLINE_COUNT: 200,
+  ONLINE_BATCH_DELAY_MS: 250,
+  ONLINE_BATCH_DELAY_JITTER_MS: 150,
+  METADATA_RETRY_DELAY_MS: 300,
 }))
 
 const { mergePersonalizedPreserved, fetchPersonalizedOnly } = await import(

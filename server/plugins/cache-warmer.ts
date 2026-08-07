@@ -69,6 +69,11 @@ export default defineNitroPlugin((nitroApp) => {
   // ---- 独立端点退避 ----
   const RECOVERY_THRESHOLD = 3 // 连续成功 3 次后恢复
 
+  // 连续重试失败达到该次数后进入冷却（期间零请求，让 B站 风控降温）
+  const RISK_COOLDOWN_AFTER_FAILURES = 3
+  // 冷却时长：5 分钟（与默认刷新间隔一致；冷却结束才恢复一次重试）
+  const RISK_COOLDOWN_MS = 5 * 60 * 1000
+
   interface EndpointBackoff {
     inBackoff: boolean
     failures: number   // 连续失败次数（退避延迟计算）
@@ -328,7 +333,16 @@ export default defineNitroPlugin((nitroApp) => {
         console.warn(
           `[cache-warmer] 排行 rid=${rid} 独立重试仍失败，连续 ${state.failures} 次`,
         )
-        scheduleEndpointRetry('ranking')
+        if (state.failures >= RISK_COOLDOWN_AFTER_FAILURES) {
+          // 连续 3 次重试失败 → 进入冷却（期间零请求，让 B站 风控降温）
+          console.warn(
+            `[cache-warmer] 排行连续失败 ${state.failures} 次，进入 ${RISK_COOLDOWN_MS / 1000}s 冷却（期间不发起请求）`,
+          )
+          if (state.timer) clearTimeout(state.timer)
+          state.timer = setTimeout(() => retryEndpoint('ranking'), RISK_COOLDOWN_MS)
+        } else {
+          scheduleEndpointRetry('ranking')
+        }
       }
     } else {
       // ---- 热门：独立重试 ----
@@ -361,7 +375,16 @@ export default defineNitroPlugin((nitroApp) => {
         state.successes = 0
         state.failures++
         console.warn(`[cache-warmer] 热门 独立重试仍失败，连续 ${state.failures} 次`)
-        scheduleEndpointRetry('popular')
+        if (state.failures >= RISK_COOLDOWN_AFTER_FAILURES) {
+          // 连续 3 次重试失败 → 进入冷却（期间零请求，让 B站 风控降温）
+          console.warn(
+            `[cache-warmer] 热门连续失败 ${state.failures} 次，进入 ${RISK_COOLDOWN_MS / 1000}s 冷却（期间不发起请求）`,
+          )
+          if (state.timer) clearTimeout(state.timer)
+          state.timer = setTimeout(() => retryEndpoint('popular'), RISK_COOLDOWN_MS)
+        } else {
+          scheduleEndpointRetry('popular')
+        }
       }
     }
   }
@@ -562,8 +585,9 @@ export default defineNitroPlugin((nitroApp) => {
 
         if (lists.failedRid) {
           // 风控触发：进入退避（失败的 rid 及其后未尝试的分区保留旧值）
+          // failures 从 0 起计：冷却只在「连续 3 次重试失败」后触发
           rankingState.inBackoff = true
-          rankingState.failures = 1
+          rankingState.failures = 0
           rankingState.successes = 0
           pendingRankingRid = lists.failedRid
           console.warn(
@@ -575,7 +599,7 @@ export default defineNitroPlugin((nitroApp) => {
           // 全部 rid 失败（首个 rid 就返回空）
           rankingFailed = true
           rankingState.inBackoff = true
-          rankingState.failures = 1
+          rankingState.failures = 0
           rankingState.successes = 0
           pendingRankingRid = VALID_RANKING_RIDS[0]
           console.warn(`[cache-warmer] 排行全部失败，进入独立退避`)
@@ -593,7 +617,7 @@ export default defineNitroPlugin((nitroApp) => {
           await useStorage('cache').setItem(POPULAR_CACHE_KEY, entry)
         } else if (lists.popularFailed) {
           popularState.inBackoff = true
-          popularState.failures = 1
+          popularState.failures = 0
           popularState.successes = 0
           console.warn(`[cache-warmer] 热门被风控，进入独立退避`)
           scheduleEndpointRetry('popular')
