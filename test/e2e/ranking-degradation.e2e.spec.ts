@@ -5,11 +5,9 @@
  * 包括数据结构验证、BV 号格式、部分降级场景、响应头合法性。
  */
 import { describe, it, expect } from 'vitest'
-import { setup, $fetch } from '@nuxt/test-utils/e2e'
+import { $fetch } from '@nuxt/test-utils/e2e'
 
 describe('排行榜降级逻辑', async () => {
-  await setup({ browser: false, server: true })
-
   /** 获取响应头 */
   async function getResponseHeaders(path: string): Promise<Headers> {
     const headers: Record<string, string> = {}

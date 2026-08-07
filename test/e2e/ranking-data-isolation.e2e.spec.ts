@@ -11,11 +11,9 @@
  * 不会看到 A 的个性化视频。
  */
 import { describe, it, expect } from 'vitest'
-import { setup, $fetch } from '@nuxt/test-utils/e2e'
+import { $fetch } from '@nuxt/test-utils/e2e'
 
 describe('排行榜数据隔离', async () => {
-  await setup({ browser: false, server: true })
-
   // ====================================================================
   // 组 1：Personalized 端点认证守卫
   // 核心防线 — 确保未认证请求在进入缓存读取之前就被拦截

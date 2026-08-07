@@ -4,11 +4,9 @@
  * 启动真实 Nuxt 测试服务器，验证直播 API 端点返回正确结构。
  */
 import { describe, it, expect } from 'vitest'
-import { setup, $fetch } from '@nuxt/test-utils/e2e'
+import { $fetch } from '@nuxt/test-utils/e2e'
 
 describe('直播 API 端点', async () => {
-  await setup({ browser: false, server: true })
-
   it('GET /api/live-rooms 返回 LiveRankingResponse 结构', { timeout: 15000 }, async () => {
     const data = await $fetch<Record<string, any>>('/api/live-rooms')
     expect(data).toHaveProperty('items')

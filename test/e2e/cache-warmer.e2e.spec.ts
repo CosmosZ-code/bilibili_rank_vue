@@ -1,18 +1,13 @@
 /**
  * cache-warmer 定时刷新 E2E 测试
  *
- * 将刷新间隔设为 3 秒，验证服务端自动刷新缓存后
- * X-Data-Timestamp 随时间递增，以及缓存头和数据完整性。
+ * 共享服务器的刷新间隔由 test/e2e/global-setup.ts 设为 3 秒，
+ * 验证服务端自动刷新缓存后 X-Data-Timestamp 随时间递增，以及缓存头和数据完整性。
  */
 import { describe, it, expect } from 'vitest'
-import { setup, $fetch } from '@nuxt/test-utils/e2e'
-
-// 在启动服务器前设置短间隔
-process.env.NUXT_CACHE_WARMER_REFRESH_INTERVAL_MS = '3000'
+import { $fetch } from '@nuxt/test-utils/e2e'
 
 describe('cache-warmer 定时刷新', async () => {
-  await setup({ browser: false, server: true })
-
   /** 读取当前缓存时间戳 */
   async function getTimestamp(): Promise<number> {
     let ts = 0

@@ -4,16 +4,10 @@
  * 启动真实 Nuxt 测试服务器，验证每个 API 端点返回正确的 HTTP 状态码
  * 这是对 server/ 目录位置问题的兜底测试
  */
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { setup, $fetch, createPage } from '@nuxt/test-utils/e2e'
+import { describe, it, expect } from 'vitest'
+import { $fetch } from '@nuxt/test-utils/e2e'
 
 describe('API 端点 HTTP 响应', async () => {
-  // 启动 Nuxt 测试服务器
-  await setup({
-    browser: false,
-    server: true,
-  })
-
 	it('GET /api/ranking 返回 200（不是 404）', { timeout: 15000 }, async () => {
 	    const data = await $fetch('/api/ranking')
 	    expect(data).toBeDefined()

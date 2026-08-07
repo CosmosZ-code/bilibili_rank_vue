@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { setup, createPage } from '@nuxt/test-utils/e2e'
+import { createPage, url } from '@nuxt/test-utils/e2e'
 
 // Mock 视频数据
 function makeMockItems(count: number) {
@@ -26,8 +26,6 @@ function makeMockItems(count: number) {
 }
 
 describe('排行榜过滤无闪烁', async () => {
-  await setup({ browser: true, server: true })
-
   it('首次加载后骨架屏消失，视频卡片正常显示', async () => {
     const page = await createPage('/')
 
@@ -196,7 +194,9 @@ describe('排行榜过滤无闪烁', async () => {
   })
 
   it('无更多数据时显示"已展示全部"', async () => {
-    const page = await createPage('/')
+    // 共享服务器 SSR 已有真实数据，必须先在 route 注册 mock 再导航，
+    // 否则真实数据会先渲染，mock 无法生效（"已展示全部"仅 mock 数据会出现）
+    const page = await createPage()
 
     // Mock 排行榜 API：hasMore = false
     await page.route('**/api/ranking**', (route) => {
@@ -213,6 +213,8 @@ describe('排行榜过滤无闪烁', async () => {
         }),
       })
     })
+
+    await page.goto(url('/'))
 
     await page.waitForSelector('.video-card', { timeout: 15000 })
     await page.waitForFunction(

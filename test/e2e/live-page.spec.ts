@@ -4,11 +4,9 @@
  * 验证直播在页面中的集成表现：标签切换、搜索、分区筛选、SSR 直出。
  */
 import { describe, it, expect } from 'vitest'
-import { setup, $fetch, createPage } from '@nuxt/test-utils/e2e'
+import { $fetch, createPage } from '@nuxt/test-utils/e2e'
 
 describe('直播页面功能', async () => {
-  await setup({ browser: true, server: true })
-
   it('默认加载"视频"模式，显示视频卡片', async () => {
     const page = await createPage('/')
     const html = await page.innerHTML('body')

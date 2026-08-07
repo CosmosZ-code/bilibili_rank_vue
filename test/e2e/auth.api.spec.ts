@@ -4,14 +4,9 @@
  * 启动真实 Nuxt 测试服务器，验证 auth 路由
  */
 import { describe, it, expect } from 'vitest'
-import { setup, $fetch } from '@nuxt/test-utils/e2e'
+import { $fetch } from '@nuxt/test-utils/e2e'
 
 describe('Auth API 路由', async () => {
-  await setup({
-    browser: false,
-    server: true,
-  })
-
   describe('GET /api/auth/qr', () => {
     it('返回二维码 URL 和 qrcode_key', { timeout: 15000 }, async () => {
       try {

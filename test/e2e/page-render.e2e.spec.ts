@@ -2,11 +2,9 @@
  * 页面渲染集成测试 — 验证核心功能能正常工作
  */
 import { describe, it, expect } from 'vitest'
-import { setup, $fetch } from '@nuxt/test-utils/e2e'
+import { $fetch } from '@nuxt/test-utils/e2e'
 
 describe('页面完整渲染', async () => {
-  await setup({ browser: false, server: true })
-
   it('首页返回 200 并包含核心内容', async () => {
     const html = await $fetch<string>('/')
     expect(html).toContain('<!DOCTYPE html>')

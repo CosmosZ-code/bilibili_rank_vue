@@ -5,14 +5,9 @@
  * rid 参数已废弃（向后兼容，所有请求统一返回 ranking:all 缓存）。
  */
 import { describe, it, expect } from 'vitest'
-import { setup, $fetch } from '@nuxt/test-utils/e2e'
+import { $fetch } from '@nuxt/test-utils/e2e'
 
 describe('全分区排行榜 API', async () => {
-  await setup({
-    browser: false,
-    server: true,
-  })
-
   it('GET /api/ranking 返回全分区合并数据', { timeout: 15000 }, async () => {
     const data = await $fetch<Record<string, any>>('/api/ranking')
     expect(data).toBeDefined()

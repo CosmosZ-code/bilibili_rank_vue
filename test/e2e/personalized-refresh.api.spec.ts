@@ -5,11 +5,9 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { setup, $fetch } from '@nuxt/test-utils/e2e'
+import { $fetch } from '@nuxt/test-utils/e2e'
 
 describe('POST /api/ranking/personalized-refresh', async () => {
-  await setup({ browser: false, server: true })
-
   // ============================================================
   // 认证安全
   // ============================================================

@@ -102,7 +102,8 @@ export default defineNitroPlugin((nitroApp) => {
   function scheduleEndpointRetry(endpoint: 'ranking' | 'popular') {
     const state = endpoint === 'ranking' ? rankingState : popularState
     if (state.timer) clearTimeout(state.timer)
-    const delay = calculateBackoffDelay(state.failures - 1, normalInterval)
+    // failures 从 0 起计（refresh 进入退避时不预置失败次数），首次失败延迟 = 30s
+    const delay = calculateBackoffDelay(Math.max(state.failures - 1, 0), normalInterval)
     console.log(`[cache-warmer] ${getEndpointName(endpoint)} ${delay / 1000}s 后独立重试`)
     state.timer = setTimeout(() => retryEndpoint(endpoint), delay)
   }
