@@ -12,7 +12,7 @@ describe('页面完整渲染', async () => {
     expect(html).toContain('观看列表')
     expect(html).toContain('过滤等级')
     // Footer
-    expect(html).toContain('bilibili_rank_html')
+    expect(html).toContain('bilibili_rank_vue')
     expect(html).toContain('此页面基于以下开源项目')
     // Banner fallback
     expect(html).toContain('--b-blue')
