@@ -107,7 +107,7 @@ export function buildPersonalizedToastMessage(count: number, titles: string[]): 
 // Composable（Vue 响应式状态管理）
 // ============================================================
 
-export function useVideoList() {
+export function useVideoList(options?: { getBlacklist?: () => string | undefined }) {
   // ---- 数据状态 ----
   const videosMap = ref<Map<string, VideoWithBvid>>(new Map())
   const displayedCount = ref(0)
@@ -225,9 +225,12 @@ export function useVideoList() {
   // ---- 个性化刷新（增量合并）----
   async function refreshPersonalized() {
     try {
+      const query = options?.getBlacklist
+        ? { blacklist: options.getBlacklist() }
+        : undefined
       const res = await $fetch<{ added: VideoWithBvid[] }>(
         '/api/ranking/personalized-refresh',
-        { method: 'POST' },
+        { method: 'POST', query },
       )
       if (!res.added || res.added.length === 0) return
 

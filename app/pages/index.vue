@@ -14,10 +14,12 @@
         :purifyPercent="purifyPercent"
         :areaId="areaId"
         :areas="areas"
+        :blockedUps="blockedUps"
         @update:viewMode="onViewModeChange"
         @update:searchTerm="onSearchTermChange"
         @update:purifyPercent="purifyPercent = $event"
         @update:areaId="areaId = $event"
+        @unblock="unblock"
       />
 
       <div ref="gridContainerRef">
@@ -27,6 +29,8 @@
             :videos="displayedVideos"
             :isLoading="effectiveVideoLoading"
             :error="error"
+            :blockedMids="blockedMids"
+            @block="toggleBlock"
           />
 
           <!-- 加载更多 -->
@@ -142,6 +146,9 @@ function onSearchTermChange(val: string) {
 const sortBy = ref<'count'>('count')
 const purifyPercent = useCookie<number>('purify_percent', { default: () => 10 })
 
+// 屏蔽 UP 黑名单（cookie + 登录后 DB 双轨同步，见 useBlacklist）
+const { blockedUps, blockedMids, toggleBlock, unblock } = useBlacklist()
+
 // 登录后从 DB 同步偏好
 if (import.meta.client) {
   const { user: authUser } = useAuth()
@@ -197,10 +204,12 @@ function buildQuery(page: number) {
     sortBy: sortBy.value,
     search: videoSearchTerm.value || undefined,
     purifyPercent: purifyPercent.value,
+    blacklist: blockedMids.value.length ? blockedMids.value.join(',') : undefined,
   }
 }
 
 // 视频列表管理器（替代 useLazyAsyncData）
+// getBlacklist：个性化增量刷新时同样携带黑名单（服务端过滤被屏蔽 UP）
 const {
   displayedVideos: vlDisplayedVideos,
   initialLoading: vlInitialLoading,
@@ -213,7 +222,7 @@ const {
   forceRefresh,
   loadMore: vlLoadMore,
   refreshPersonalized,
-} = useVideoList()
+} = useVideoList({ getBlacklist: () => blockedMids.value.length ? blockedMids.value.join(',') : undefined })
 
 // 登录成功（未登录 → 已登录）→ 立即拉取个性化数据
 if (import.meta.client) {
@@ -236,7 +245,7 @@ if (import.meta.client) {
 }
 
 // 过滤变化 → 无闪烁刷新（300ms 防抖内置于 refreshFilter）
-watch([videoSearchTerm, purifyPercent], () => {
+watch([videoSearchTerm, purifyPercent, blockedUps], () => {
   refreshFilter(() => buildQuery(1))
 })
 

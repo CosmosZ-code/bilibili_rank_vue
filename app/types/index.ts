@@ -29,6 +29,14 @@ export interface VideoInfo {
 /** 以 BV 号为 key 的视频数据字典 */
 export type VideosDataMap = Record<string, VideoInfo>
 
+/** 已屏蔽的 UP 条目 */
+export interface BlacklistItem {
+  /** UP主 mid（唯一标识） */
+  mid: string
+  /** UP主名称（展示用，冗余存储） */
+  owner: string
+}
+
 /** 排序方式 */
 export type SortBy = 'count'
 

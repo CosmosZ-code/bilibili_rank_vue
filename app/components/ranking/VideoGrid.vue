@@ -20,6 +20,8 @@
         :key="(video as any).bvid || index"
         :video="video"
         :index="index"
+        :blockedMids="blockedMids"
+        @block="$emit('block', $event)"
       />
     </div>
   </div>
@@ -32,6 +34,12 @@ defineProps<{
   videos: VideoInfo[]
   isLoading: boolean
   error: string | null
+  /** 已屏蔽 UP 的 mid 列表（透传给卡片控制菜单文案） */
+  blockedMids: string[]
+}>()
+
+defineEmits<{
+  block: [item: { mid: string; owner: string }]
 }>()
 </script>
 

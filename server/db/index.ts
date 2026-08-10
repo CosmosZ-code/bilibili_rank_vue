@@ -180,6 +180,14 @@ export async function initDb(dbPath?: string): Promise<Database> {
     purify_percent INTEGER NOT NULL DEFAULT 10
   )`)
 
+  sqlDb.run(`CREATE TABLE IF NOT EXISTS user_blacklist (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    mid TEXT NOT NULL,
+    owner TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, mid)
+  )`)
+
   saveDb()
   return db
 }

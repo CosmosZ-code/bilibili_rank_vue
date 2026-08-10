@@ -182,6 +182,59 @@ describe('纯净度过滤', () => {
 })
 
 // ============================================================
+// 黑名单过滤（屏蔽UP）
+// ============================================================
+describe('黑名单过滤（屏蔽UP）', () => {
+  const videos = makeDataMap([
+    { bvid: 'BV1', owner: 'UP1', mid: '10001' },
+    { bvid: 'BV2', owner: 'UP2', mid: '10002' },
+    { bvid: 'BV3', owner: 'UP3', mid: '10003' },
+  ])
+
+  it('屏蔽 mid 的视频被剔除', () => {
+    const result = sortAndFilterRanking(videos, { blacklist: ['10002'] })
+    expect(result.map((v) => v.bvid)).toEqual(['BV1', 'BV3'])
+  })
+
+  it('多个屏蔽 mid 全部剔除', () => {
+    const result = sortAndFilterRanking(videos, { blacklist: ['10001', '10003'] })
+    expect(result.map((v) => v.bvid)).toEqual(['BV2'])
+  })
+
+  it('blacklist 空数组时不过滤', () => {
+    const result = sortAndFilterRanking(videos, { blacklist: [] })
+    expect(result).toHaveLength(3)
+  })
+
+  it('不传 blacklist 时不过滤（向后兼容）', () => {
+    const result = sortAndFilterRanking(videos)
+    expect(result).toHaveLength(3)
+  })
+
+  it('屏蔽后 total 按过滤后数量计算（分页正确性）', () => {
+    const result = sortAndFilterRanking(videos, { blacklist: ['10001', '10002'] })
+    expect(result).toHaveLength(1)
+    expect(result[0].bvid).toBe('BV3')
+  })
+
+  it('与搜索过滤叠加生效', () => {
+    const result = sortAndFilterRanking(videos, { search: 'UP1', blacklist: ['10001'] })
+    // 搜索命中 BV1（owner=UP1），但已被屏蔽 → 空
+    expect(result).toHaveLength(0)
+  })
+
+  it('与净化过滤叠加生效', () => {
+    const dataMap = makeDataMap([
+      { bvid: 'BV1', mid: '10001', play_count_num: 10_000_000, danmaku_count_num: 100 },
+      { bvid: 'BV2', mid: '10002', play_count_num: 100_000, danmaku_count_num: 5000 },
+    ])
+    const result = sortAndFilterRanking(dataMap, { purifyPercent: 20, blacklist: ['10002'] })
+    // 净化过滤后仅 BV2（BV1 不达标），但 BV2 被屏蔽 → 空
+    expect(result).toHaveLength(0)
+  })
+})
+
+// ============================================================
 // 新增：分页相关用例
 // ============================================================
 describe('分页 — 过滤 + 切片', () => {

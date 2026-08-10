@@ -29,8 +29,16 @@
           {{ video.danmaku_count }}
         </span>
       </div>
-      <div class="video-owner" @click.stop="openOwner">
-        {{ video.owner }}
+      <div ref="ownerRef" class="video-owner" @click.stop="openOwner">
+        <span class="owner-name">{{ video.owner }}</span>
+        <button class="owner-more" @click.stop="toggleMenu">···</button>
+        <Transition name="fade">
+          <div v-if="menuOpen" class="owner-menu" @click.stop>
+            <div class="owner-menu-item" @click="onMenuAction">
+              {{ isBlocked ? '取消屏蔽该UP' : '不看该UP' }}
+            </div>
+          </div>
+        </Transition>
       </div>
     </div>
     <div class="online-count">
@@ -45,7 +53,44 @@ import type { VideoInfo } from '../../types'
 const props = defineProps<{
   video: VideoInfo & { bvid?: string }
   index: number
+  blockedMids: string[]
 }>()
+
+const emit = defineEmits<{
+  block: [item: { mid: string; owner: string }]
+}>()
+
+// ---- 屏蔽 UP 下拉菜单 ----
+const blockedSet = computed(() => new Set(props.blockedMids))
+const isBlocked = computed(() => blockedSet.value.has(props.video.mid))
+
+const menuOpen = ref(false)
+const ownerRef = ref<HTMLElement | null>(null)
+
+function toggleMenu() {
+  menuOpen.value = !menuOpen.value
+}
+
+function onMenuAction() {
+  emit('block', { mid: props.video.mid, owner: props.video.owner })
+  menuOpen.value = false
+}
+
+// 点击外部关闭
+function onDocumentClick(e: MouseEvent) {
+  if (!menuOpen.value) return
+  if (isClickOutside(e.target as Node, [ownerRef.value])) {
+    menuOpen.value = false
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('click', onDocumentClick)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', onDocumentClick)
+})
 
 const rankClass = computed(() => {
   if (props.index < 3) return `rank-${props.index + 1}`
@@ -163,10 +208,77 @@ function openOwner() {
   transition: color 0.3s;
   margin-top: 6px;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  position: relative;
+}
+
+.owner-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.owner-more {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  color: var(--b-gray);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 3px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: color 0.2s, background-color 0.2s;
+}
+
+.owner-more:hover {
+  color: var(--b-pink);
+  background-color: #f5f5f5;
+}
+
+/* 屏蔽菜单：向上弹出（.video-card 有 overflow:hidden，不能向下溢出） */
+.owner-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 4px);
+  background: white;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  min-width: max-content;
+  z-index: 20;
+  padding: 4px 0;
+}
+
+.owner-menu-item {
+  padding: 8px 16px;
+  font-size: 12px;
+  color: #333;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.owner-menu-item:hover {
+  background-color: #f5f5f5;
+  color: var(--b-pink);
 }
 
 .video-owner:hover {
   color: var(--b-blue) !important;
+}
+
+/* 淡入淡出过渡 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 
 .online-count {

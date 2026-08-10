@@ -35,10 +35,11 @@ import {
  * @param opts.sortBy - 排序方式（默认 'count'）
  * @param opts.search - 搜索关键词（大小写不敏感，匹配 title / owner）
  * @param opts.purifyPercent - 净化阈值（0 = 不过滤）
+ * @param opts.blacklist - 屏蔽的 UP mid 列表（可选，匹配 VideoInfo.mid）
  */
 export function sortAndFilterRanking(
   dataMap: VideosDataMap,
-  opts: { sortBy?: string; search?: string; purifyPercent?: number } = {},
+  opts: { sortBy?: string; search?: string; purifyPercent?: number; blacklist?: string[] } = {},
 ): VideoWithBvid[] {
   let list: VideoWithBvid[] = Object.entries(dataMap).map(([bvid, info]) => ({
     bvid,
@@ -62,6 +63,12 @@ export function sortAndFilterRanking(
     list = list.filter(
       (v) => v.title.toLowerCase().includes(term) || v.owner.toLowerCase().includes(term),
     )
+  }
+
+  // 黑名单过滤（屏蔽 UP：按 mid 剔除）
+  if (opts.blacklist && opts.blacklist.length > 0) {
+    const blocked = new Set(opts.blacklist)
+    list = list.filter((v) => !blocked.has(v.mid))
   }
 
   // 净化过滤

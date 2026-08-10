@@ -13,6 +13,7 @@
  * - sortBy: 排序方式（默认 'count'）
  * - search: 搜索关键词（可选，匹配 title/owner）
  * - purifyPercent: 净化阈值（可选，默认 0）
+ * - blacklist: 屏蔽的 UP mid 列表（可选，逗号分隔）
  */
 import type { CacheEntry, VideosDataMap, RankingResponse } from '../../app/types'
 import { sortAndFilterRanking } from '../utils/rankingFetcher'
@@ -26,6 +27,9 @@ export default defineEventHandler(async (event) => {
   const sortBy = String(query.sortBy || DEFAULT_SORT_BY)
   const search = query.search ? String(query.search) : undefined
   const purifyPercent = query.purifyPercent !== undefined ? Number(query.purifyPercent) : undefined
+  const blacklist = query.blacklist
+    ? String(query.blacklist).split(',').map((s) => s.trim()).filter(Boolean)
+    : undefined
 
   const cacheKey = COMBINED_CACHE_KEY
   const cacheTTL = 10 * 60 * 1000
@@ -72,7 +76,7 @@ export default defineEventHandler(async (event) => {
   }
 
   // 4. 排序 + 过滤
-  const filtered = sortAndFilterRanking(dataMap, { sortBy, search, purifyPercent })
+  const filtered = sortAndFilterRanking(dataMap, { sortBy, search, purifyPercent, blacklist })
   const total = filtered.length
 
   // 5. 分页切片

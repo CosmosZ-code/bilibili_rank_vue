@@ -2,9 +2,9 @@
  * 数据库 Schema 定义
  *
  * 使用 Drizzle ORM + sql.js (WASM SQLite)
- * 4 张表：users / bilibili_cookies / refresh_tokens / sessions
+ * 5 张表：users / bilibili_cookies / refresh_tokens / user_preferences / user_blacklist / sessions
  */
-import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core'
+import { sqliteTable, text, integer, primaryKey } from 'drizzle-orm/sqlite-core'
 import { sql } from 'drizzle-orm'
 
 // ============================================================
@@ -70,6 +70,26 @@ export const userPreferences = sqliteTable('user_preferences', {
     .references(() => users.id, { onDelete: 'cascade' }),
   purifyPercent: integer('purify_percent').notNull().default(10),
 })
+
+// ============================================================
+// user_blacklist — 用户屏蔽的 UP 列表
+// ============================================================
+export const userBlacklist = sqliteTable(
+  'user_blacklist',
+  {
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** UP主 mid */
+    mid: text('mid').notNull(),
+    /** UP主名称（冗余存储，展示用） */
+    owner: text('owner').notNull(),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.mid] })],
+)
 
 // ============================================================
 // sessions — 本地登录会话
