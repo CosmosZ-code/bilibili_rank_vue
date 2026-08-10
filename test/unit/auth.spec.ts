@@ -25,9 +25,11 @@ vi.stubGlobal('createError', (opts: { statusCode: number; message: string; statu
 // Mock getNavUserInfo (避免网络调用)
 // ============================================================
 const mockGetNavUserInfo = vi.fn()
+const mockRefreshBilibiliCookie = vi.fn()
 
 vi.mock('../../server/utils/bilibili', () => ({
   getNavUserInfo: (...args: any[]) => mockGetNavUserInfo(...args),
+  refreshBilibiliCookie: (...args: any[]) => mockRefreshBilibiliCookie(...args),
 }))
 
 // ============================================================
@@ -56,6 +58,8 @@ afterAll(() => {
 
 beforeEach(async () => {
   vi.clearAllMocks()
+  // Cookie 续期 mock 默认"无需刷新"，避免干扰其他测试
+  mockRefreshBilibiliCookie.mockResolvedValue({ cookie: '', refreshToken: '', refreshed: false })
   // 清空所有表
   const db = await getDb()
   const { users, bilibiliCookies, refreshTokens, sessions } = await import('../../server/db/schema')

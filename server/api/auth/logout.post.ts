@@ -12,10 +12,10 @@ export default defineEventHandler(async (event) => {
     await removeSession(sessionId)
   }
 
-  // 清除 cookie
+  // 清除 cookie（secure 需与写入时一致，跟随请求协议）
   deleteCookie(event, 'session_id', {
     httpOnly: true,
-    secure: true,
+    secure: getRequestProtocol(event) === 'https',
     sameSite: 'lax',
     path: '/',
   })

@@ -8,7 +8,7 @@ import { getDb, getRawSqlDb, saveDb } from '../db'
 import { users, bilibiliCookies, refreshTokens, sessions } from '../db/schema'
 import { eq, and, lt } from 'drizzle-orm'
 import { encrypt, decrypt } from './crypto'
-import { getNavUserInfo, type QrPollResult } from './bilibili'
+import { getNavUserInfo, refreshBilibiliCookie, type QrPollResult } from './bilibili'
 
 // ============================================================
 // 类型
@@ -91,6 +91,9 @@ export async function getSessionUser(sessionId: string): Promise<SessionResult |
 
   // 4. 查 Cookie（可能不存在，如仅 OAuth 登录但未扫码）
   const cookie = await getBilibiliCookie(user.id)
+
+  // 每日检查一次 B站 Cookie 是否需要续期（异步、失败静默，不阻塞本次请求）
+  maybeRefreshBilibiliCookie(user.id)
 
   return {
     user: {
@@ -206,7 +209,8 @@ export async function storeBilibiliCookie(
   // 存储 refresh_token（如果有）
   if (refreshToken) {
     const encryptedRt = encrypt(refreshToken, config.encryptKey)
-    const expiresAt = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString() // 30 天
+    // 与 SESSDATA 有效期（约 180 天）对齐
+    const expiresAt = new Date(Date.now() + 180 * 24 * 3600 * 1000).toISOString()
 
     const [existingRt] = await db
       .select()
@@ -256,6 +260,70 @@ export async function getBilibiliCookie(userId: number): Promise<string | null> 
     await db.delete(bilibiliCookies).where(eq(bilibiliCookies.id, row.id)).run()
     saveDb()
     return null
+  }
+}
+
+// ============================================================
+// Cookie 自动续期
+// ============================================================
+
+// 每日续期检查节流：记录每个用户最后一次检查的日期（YYYY-MM-DD）
+const refreshCheckDates = new Map<number, string>()
+
+/**
+ * 获取并解密 refresh_token
+ *
+ * @param userId - 用户 ID
+ * @returns 解密后的 refresh_token，或 null（无记录/已过期/解密失败）
+ */
+export async function getRefreshToken(userId: number): Promise<string | null> {
+  const db = await getDb()
+
+  const [row] = await db
+    .select()
+    .from(refreshTokens)
+    .where(eq(refreshTokens.userId, userId))
+    .all()
+
+  if (!row) return null
+
+  // 已过期
+  if (new Date(row.expiresAt) < new Date()) return null
+
+  const config = useRuntimeConfig()
+  try {
+    return decrypt(row.refreshTokenEncrypted, config.encryptKey)
+  } catch {
+    // 解密失败（密钥变更等），清除无效记录
+    await db.delete(refreshTokens).where(eq(refreshTokens.id, row.id)).run()
+    saveDb()
+    return null
+  }
+}
+
+/**
+ * 每日检查一次 B站 Cookie 是否需要续期（失败静默降级）
+ *
+ * 仅当 B站 返回需要刷新时才执行完整续期流程，刷新成功后回写数据库。
+ * 任何异常都不抛出——本次请求继续使用旧 Cookie，不影响主流程。
+ * 模块级 Map 节流：同一用户同一天最多检查一次。
+ */
+export async function maybeRefreshBilibiliCookie(userId: number): Promise<void> {
+  try {
+    const today = new Date().toISOString().slice(0, 10)
+    if (refreshCheckDates.get(userId) === today) return
+    refreshCheckDates.set(userId, today)
+
+    const cookie = await getBilibiliCookie(userId)
+    const refreshToken = await getRefreshToken(userId)
+    if (!cookie || !refreshToken) return
+
+    const result = await refreshBilibiliCookie(cookie, refreshToken)
+    if (result.refreshed) {
+      await storeBilibiliCookie(userId, result.cookie, result.refreshToken)
+    }
+  } catch (err) {
+    console.warn('[maybeRefreshBilibiliCookie] Cookie 续期失败（忽略）:', (err as Error).message || err)
   }
 }
 

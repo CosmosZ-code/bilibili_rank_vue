@@ -27,9 +27,11 @@ export default defineEventHandler(async (event) => {
     const sessionId = await handleLoginSuccess(result.cookie, result.refreshToken)
 
     // 设置 session cookie
+    // 仅 HTTPS 下启用 secure：HTTP 环境（本地 dev 等）浏览器会拒绝保存 secure cookie，
+    // 导致登录成功但后续请求拿不到 session（右上角仍显示未登录）
     setCookie(event, 'session_id', sessionId, {
       httpOnly: true,
-      secure: true,
+      secure: getRequestProtocol(event) === 'https',
       sameSite: 'lax',
       maxAge: 60 * 60 * 24 * 30, // 30 天
       path: '/',

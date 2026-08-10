@@ -42,25 +42,16 @@
       </Transition>
     </div>
 
-    <!-- 视频模式：过滤等级滑块（隐藏时用占位保持搜索框位置不动） -->
-    <div :style="{ display: 'flex', alignItems: 'center', gap: '10px', marginLeft: '8px', visibility: viewMode === 'videos' ? 'visible' : 'hidden' }">
-      <label for="percent-range" style="font-size: 14px; color: #333;">过滤等级：</label>
-      <input
-        id="percent-range"
-        type="range"
-        min="0"
-        max="100"
-        :value="purifyPercent"
-        style="width: 180px;"
-        @input="$emit('update:purifyPercent', Number(($event.target as HTMLInputElement).value))"
-      />
-      <span style="font-size: 14px; color: #333; min-width: 40px; text-align: right;">
-        {{ purifyPercent }}%
-      </span>
-    </div>
+    <!-- 视频模式：过滤等级滑块（隐藏时用占位保持搜索框位置不动，仅桌面端显示） -->
+    <PercentFilter
+      class="controls-percent"
+      :model-value="purifyPercent"
+      :hidden="viewMode !== 'videos'"
+      @update:model-value="$emit('update:purifyPercent', $event)"
+    />
 
-    <!-- 搜索框 -->
-    <SearchBox :modelValue="searchTerm" @update:modelValue="$emit('update:searchTerm', $event)" />
+    <!-- 搜索框（移动端移至侧栏，仅桌面端显示） -->
+    <SearchBox class="controls-search" :modelValue="searchTerm" @update:modelValue="$emit('update:searchTerm', $event)" />
 
     <!-- 排序/切换区 — sort-btn 风格的两个按钮 -->
     <div class="sort-options">
@@ -192,26 +183,11 @@ watch(() => props.viewMode, () => {
 })
 
 // ---- 屏蔽列表排序 + 分页（每页 10 条，按 UP 名首字拼音排序） ----
-const BLACKLIST_PAGE_SIZE = 10
-const blacklistPage = ref(1)
-
-const sortedBlockedUps = computed(() => sortBlacklistByOwner(props.blockedUps))
-
-const blacklistTotalPages = computed(() =>
-  Math.max(1, Math.ceil(sortedBlockedUps.value.length / BLACKLIST_PAGE_SIZE)),
-)
-
-const blacklistPageItems = computed(() => {
-  const start = (blacklistPage.value - 1) * BLACKLIST_PAGE_SIZE
-  return sortedBlockedUps.value.slice(start, start + BLACKLIST_PAGE_SIZE)
-})
-
-// 列表变化（取消屏蔽等）→ 页码越界时回退到最后一页
-watch(() => props.blockedUps.length, () => {
-  if (blacklistPage.value > blacklistTotalPages.value) {
-    blacklistPage.value = Math.max(1, blacklistTotalPages.value)
-  }
-})
+const {
+  page: blacklistPage,
+  totalPages: blacklistTotalPages,
+  pageItems: blacklistPageItems,
+} = useBlacklistPanel(toRef(props, 'blockedUps'))
 
 // 点击 document 外部关闭下拉（直播下拉仅触屏；黑名单下拉全设备）
 function onDocumentClick(e: MouseEvent) {
@@ -247,6 +223,11 @@ onUnmounted(() => {
   border-top: 1px solid var(--b-border);
   border-bottom: 1px solid var(--b-border);
   padding: 10px 0;
+}
+
+/* 桌面端过滤滑块（PercentFilter 根元素）：保持原内联样式的间距 */
+.controls-percent {
+  margin-left: 8px;
 }
 
 .b-head-t {
@@ -543,5 +524,23 @@ onUnmounted(() => {
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+/* 移动端：仅保留 [视频|直播] 切换，其余控件收纳进侧栏（MobileSidebar）。
+   置于文件末尾，保证媒体查询规则不被前面同特异性规则覆盖 */
+@media (max-width: 768px) {
+  .b-head,
+  .blacklist-dropdown,
+  .controls-percent,
+  .controls-search {
+    display: none;
+  }
+
+  /* 切换按钮靠右，与网格 gap 协调 */
+  .sort-options {
+    margin: 0;
+    margin-left: auto;
+    margin-right: 12px;
+  }
 }
 </style>

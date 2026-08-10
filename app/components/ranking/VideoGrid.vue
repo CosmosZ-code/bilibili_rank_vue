@@ -54,6 +54,7 @@ defineEmits<{
   .video-grid {
     grid-template-columns: repeat(2, 1fr);
     gap: 12px;
+    padding: 0 12px; /* 左右余量（与切换按钮右侧余量对齐） */
   }
 }
 

@@ -41,9 +41,30 @@
           <!-- 二维码展示 -->
           <div v-else-if="qrStatus === 'pending' || qrStatus === 'scanned'" class="qr-wrap">
             <canvas ref="qrCanvasRef" class="qr-canvas"></canvas>
-            <p class="qr-tip">
-              {{ qrStatus === 'scanned' ? '✓ 已扫码，请在手机上确认' : '请使用 B站客户端 扫码登录' }}
-            </p>
+
+            <!-- 桌面端：扫码提示 -->
+            <template v-if="!isTouch">
+              <p class="qr-tip">
+                {{ qrStatus === 'scanned' ? '✓ 已扫码，请在手机上确认' : '请使用 B站客户端 扫码登录' }}
+              </p>
+            </template>
+
+            <!-- 触屏端：App 确认引导（手机无法自扫，引导唤起 App / 截图扫码） -->
+            <template v-else>
+              <a
+                v-if="qrStatus === 'pending'"
+                class="app-confirm-btn"
+                :href="qrUrl"
+                target="_blank"
+                rel="noopener"
+              >在 B站 App 中确认登录</a>
+              <p class="qr-tip">
+                {{ qrStatus === 'scanned' ? '✓ 已扫码，请在 App 中确认' : '未自动打开 App？' }}
+              </p>
+              <p v-if="qrStatus === 'pending'" class="qr-tip app-fallback-tip">
+                截图保存上方二维码 → 打开 B站 App →<br>扫一扫 → 右上角相册选图
+              </p>
+            </template>
           </div>
 
           <!-- 过期 -->
@@ -73,7 +94,7 @@
 <script setup lang="ts">
 import QRCode from 'qrcode'
 
-const { user, isLoggedIn, fetchUser, logout } = useAuth()
+const { user, isLoggedIn, fetchUser, logout, loading } = useAuth()
 const { isTouch } = useTouchDevice()
 
 const showQr = ref(false)
@@ -123,13 +144,19 @@ function onDocumentClick(e: MouseEvent) {
 
 onMounted(() => {
   document.addEventListener('click', onDocumentClick)
+  document.addEventListener('visibilitychange', onVisibilityChange)
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', onDocumentClick)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 let qrcodeKey = ''
 let qrCookies = ''
+/** 二维码内容 URL（B站 App 内确认登录页地址，触屏端用于唤起 App） */
+let qrUrl = ''
+/** 轮询连续失败计数（网络瞬时错误不立即中止流程） */
+let pollFailCount = 0
 
 /** 生成二维码到 canvas */
 async function renderQr(url: string) {
@@ -155,13 +182,26 @@ async function pollStatus() {
       message?: string
     }>('/api/auth/qr-check', { params: { qrcode_key: qrcodeKey, cookies: qrCookies } })
 
+    // 收到服务端响应即视为轮询正常，重置失败计数
+    pollFailCount = 0
+
     // success 最高优先级：可以覆盖任何状态（包括已显示 expired/error）
     if (data.status === 'success') {
       qrStatus.value = 'success'
       stopPolling()
       setTimeout(async () => {
         showQr.value = false
-        await fetchUser()
+        // 等待可能的并发 fetchUser（loading 锁）完成，避免锁内直接 return
+        for (let i = 0; i < 10 && loading.value; i++) {
+          await new Promise((r) => setTimeout(r, 200))
+        }
+        // session 已建立，fetchUser 偶发失败时重试（最多 3 次），
+        // 避免登录成功但界面仍显示未登录
+        for (let attempt = 0; attempt < 3; attempt++) {
+          await fetchUser()
+          if (isLoggedIn.value) break
+          await new Promise((r) => setTimeout(r, 1000))
+        }
       }, 800)
       return
     }
@@ -186,9 +226,28 @@ async function pollStatus() {
   } catch {
     // success 优先：如果已有 success 则忽略网络错误
     if (qrStatus.value === 'success') return
-    qrStatus.value = 'error'
-    stopPolling()
+    // 网络瞬时错误不立即中止：App 确认期间页面可能被切到后台，
+    // 定时器被浏览器冻结/请求超时，切回页面后由 visibilitychange 立即重试。
+    // 仅连续失败多次才进入错误态。
+    pollFailCount++
+    if (pollFailCount >= 3) {
+      qrStatus.value = 'error'
+      stopPolling()
+    }
   }
+}
+
+/**
+ * 页面从后台切回时立即轮询一次
+ *
+ * App 确认登录期间网页 tab 处于后台，浏览器会冻结定时器导致轮询暂停；
+ * 切回页面时立即检查一次，避免错过登录成功状态。
+ */
+function onVisibilityChange() {
+  if (document.visibilityState !== 'visible') return
+  if (!showQr.value) return
+  if (qrStatus.value === 'success' || qrStatus.value === 'expired' || qrStatus.value === 'error') return
+  pollStatus()
 }
 
 function stopPolling() {
@@ -203,11 +262,13 @@ async function startLogin() {
   showQr.value = true
   qrStatus.value = 'loading'
   stopPolling()
+  pollFailCount = 0
 
   try {
       const data = await $fetch<{ url: string; qrcode_key: string; cookies: string }>('/api/auth/qr')
       qrcodeKey = data.qrcode_key
       qrCookies = data.cookies || ''
+      qrUrl = data.url
 
     // 先切换到 pending 让 canvas DOM 渲染，再 nextTick 后绘制
     qrStatus.value = 'pending'
@@ -284,6 +345,13 @@ onMounted(() => {
   white-space: nowrap;
 }
 
+/* 移动端：顶栏为透明底（MobileTopBar），用户名改用灰色 */
+@media (max-width: 768px) {
+  .username {
+    color: var(--b-gray);
+  }
+}
+
 .dropdown-menu {
   position: absolute;
   top: 100%;
@@ -330,6 +398,7 @@ onMounted(() => {
   border-radius: 12px;
   padding: 24px;
   min-width: 280px;
+  max-width: 90vw;
   text-align: center;
   color: #fff;
 }
@@ -341,11 +410,31 @@ onMounted(() => {
 .qr-canvas {
   border-radius: 8px;
   background: #fff;
+  max-width: 100%;
 }
 .qr-tip {
   margin: 12px 0 0;
   font-size: 13px;
   color: #aaa;
+}
+.app-confirm-btn {
+  display: block;
+  margin: 14px auto 0;
+  background: var(--b-pink);
+  color: #fff;
+  border-radius: 6px;
+  padding: 10px 16px;
+  font-size: 14px;
+  text-decoration: none;
+  transition: opacity 0.2s;
+}
+.app-confirm-btn:hover {
+  opacity: 0.85;
+}
+.app-fallback-tip {
+  font-size: 12px;
+  color: #888;
+  line-height: 1.6;
 }
 .qr-loading, .qr-expired, .qr-success, .qr-error {
   padding: 20px 0;

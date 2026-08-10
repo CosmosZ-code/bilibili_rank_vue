@@ -20,9 +20,12 @@ const expectedComponents = [
   'ranking/VideoCardSkeleton.vue',
   'common/BackToTop.vue',
   'common/SearchBox.vue',
+  'common/PercentFilter.vue',
   'nav/NavDropdown.vue',
   'nav/NavDropdownItem.vue',
   'nav/HistoryDropdown.vue',
+  'nav/MobileSidebar.vue',
+  'nav/MobileTopBar.vue',
   'auth/BilibiliLogin.vue',
 ]
 
@@ -102,7 +105,35 @@ describe('组件关键内容验证', () => {
     const content = await fs.readFile(resolve(componentsDir, 'ranking/RankingControls.vue'), 'utf-8')
     expect(content).toContain('SearchBox')
     expect(content).toContain('sort-options')
+    // 过滤滑块已抽为 PercentFilter 组件（RankingControls 引用之）
+    expect(content).toContain('PercentFilter')
+  })
+
+  it('PercentFilter 包含过滤等级滑块（原内联样式迁移至组件）', async () => {
+    const fs = await import('node:fs/promises')
+    const content = await fs.readFile(resolve(componentsDir, 'common/PercentFilter.vue'), 'utf-8')
     expect(content).toContain('percent-range')
+    expect(content).toContain('update:modelValue')
+  })
+
+  it('MobileSidebar 包含搜索/过滤/历史/已屏蔽UP 折叠菜单（移动端控件收纳）', async () => {
+    const fs = await import('node:fs/promises')
+    const content = await fs.readFile(resolve(componentsDir, 'nav/MobileSidebar.vue'), 'utf-8')
+    expect(content).toContain('SearchBox')
+    expect(content).toContain('PercentFilter')
+    expect(content).toContain('history-toggle') // 观看历史折叠菜单
+    expect(content).toContain('blacklist-toggle')
+    // 历史默认展开（与已屏蔽UP 默认收起相对）
+    expect(content).toContain('historyOpen = ref(true)')
+    // 折叠菜单标题 sticky 吸顶（下滑时维持顶部）
+    expect(content).toContain('sticky')
+  })
+
+  it('MobileTopBar 包含汉堡按钮（展开侧栏）', async () => {
+    const fs = await import('node:fs/promises')
+    const content = await fs.readFile(resolve(componentsDir, 'nav/MobileTopBar.vue'), 'utf-8')
+    expect(content).toContain('menu-btn')
+    expect(content).toContain('useMobileDrawer')
   })
 
   it('RankingControls 包含触屏两阶段点按逻辑', async () => {

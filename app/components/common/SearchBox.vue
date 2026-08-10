@@ -26,4 +26,11 @@ defineEmits<{
   width: 250px;
   margin: 10px 0;
 }
+
+/* 移动端：侧栏内全宽（控制栏的搜索框此时已被隐藏，无副作用） */
+@media (max-width: 768px) {
+  .search-box {
+    width: 100%;
+  }
+}
 </style>

@@ -14,7 +14,7 @@
  */
 
 import type { BilibiliResponse } from '../../app/types'
-import { createHash, createHmac } from 'node:crypto'
+import { createHash, createHmac, publicEncrypt, constants } from 'node:crypto'
 
 const BILIBILI_API_BASE = 'https://api.bilibili.com'
 
@@ -1031,4 +1031,229 @@ export function dedupByRoomid<T extends { roomid: number }>(list: T[]): T[] {
     seen.add(item.roomid)
     return true
   })
+}
+
+// ============================================================
+// Cookie 续期（Web 端官方四步流程）
+// 参考：bilibili-API-collect docs/login/cookie_refresh.md
+// ============================================================
+
+const CORRESPOND_BASE = 'https://www.bilibili.com'
+
+/** 生成 correspondPath 用的固定 RSA 公钥（来自 cookie_refresh.md） */
+const REFRESH_PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----
+MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDLgd2OAkcGVtoE3ThUREbio0Eg
+Uc/prcajMKXvkCKFCWhJYJcLkcM2DKKcSeFpD/j6Boy538YXnR6VhcuUJOhH2x71
+nzPjfdTcqMz7djHum0qSZA0AyCBDABUqCrfNgCiJ00Ra7GmRj+YCK1NJEuewlb40
+JNrRuoEUXpabUzGB8QIDAQAB
+-----END PUBLIC KEY-----`
+
+/** 从 Cookie 字符串中提取指定键的值 */
+export function getCookieValue(cookie: string, name: string): string | null {
+  const match = cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`))
+  return match ? match[1] : null
+}
+
+/** Cookie 续期检查结果 */
+export interface CookieRefreshCheck {
+  /** 是否应该刷新 Cookie */
+  refresh: boolean
+  /** 当前毫秒时间戳（用于生成 correspondPath） */
+  timestamp: number
+}
+
+/**
+ * 检查 Cookie 是否需要刷新
+ *
+ * API: GET https://passport.bilibili.com/x/passport-login/web/cookie/info?csrf={bili_jct}
+ * 鉴权方式：Cookie
+ */
+export async function checkCookieRefresh(cookie: string): Promise<CookieRefreshCheck> {
+  const csrf = getCookieValue(cookie, 'bili_jct')
+  const url = `${PASSPORT_BASE}/x/passport-login/web/cookie/info${csrf ? `?csrf=${encodeURIComponent(csrf)}` : ''}`
+
+  const response = await fetch(url, {
+    headers: { ...DEFAULT_HEADERS, Cookie: cookie },
+  })
+
+  if (!response.ok) {
+    throw createError({
+      statusCode: 502,
+      message: `B站Cookie续期检查失败: HTTP ${response.status}`,
+    })
+  }
+
+  const body = await response.json() as {
+    code: number
+    message: string
+    data?: { refresh?: boolean; timestamp?: number }
+  }
+
+  if (body.code !== 0 || !body.data) {
+    throw createError({
+      statusCode: 502,
+      message: `B站Cookie续期检查失败 [${body.code}]: ${body.message}`,
+    })
+  }
+
+  return {
+    refresh: body.data.refresh === true,
+    timestamp: body.data.timestamp || Date.now(),
+  }
+}
+
+/**
+ * 生成 correspondPath
+ *
+ * 将 `refresh_${毫秒时间戳}` 用固定 RSA 公钥做 OAEP(SHA-256) 加密，密文转小写 hex
+ */
+export function generateCorrespondPath(timestamp: number): string {
+  const encrypted = publicEncrypt(
+    {
+      key: REFRESH_PUBLIC_KEY_PEM,
+      padding: constants.RSA_PKCS1_OAEP_PADDING,
+      oaepHash: 'sha256',
+    },
+    Buffer.from(`refresh_${timestamp}`, 'utf8'),
+  )
+  return encrypted.toString('hex')
+}
+
+/**
+ * 获取实时刷新口令 refresh_csrf
+ *
+ * API: GET https://www.bilibili.com/correspond/1/{correspondPath}
+ * 请求该 url 返回 HTML，其中 <div id="1-name"> 的内容即 refresh_csrf
+ */
+export async function getRefreshCsrf(correspondPath: string, cookie: string): Promise<string> {
+  const response = await fetch(`${CORRESPOND_BASE}/correspond/1/${correspondPath}`, {
+    headers: { ...DEFAULT_HEADERS, Cookie: cookie },
+  })
+
+  if (!response.ok) {
+    throw createError({
+      statusCode: 502,
+      message: `获取refresh_csrf失败: HTTP ${response.status}`,
+    })
+  }
+
+  const html = await response.text()
+  const match = html.match(/<div id="1-name">([\s\S]*?)<\/div>/)
+
+  if (!match || !match[1].trim()) {
+    throw createError({
+      statusCode: 502,
+      message: '获取refresh_csrf失败: 响应中未找到刷新口令',
+    })
+  }
+
+  return match[1].trim()
+}
+
+/** Cookie 续期结果 */
+export interface CookieRefreshResult {
+  /** 刷新后的完整 Cookie 字符串 */
+  cookie: string
+  /** 刷新后的 refresh_token */
+  refreshToken: string
+  /** 是否实际执行了刷新（false 表示检查后无需刷新） */
+  refreshed: boolean
+}
+
+/**
+ * 执行 Web 端 Cookie 续期完整流程
+ *
+ * 1. cookie/info 检查是否需要刷新（无需刷新则直接返回原值）
+ * 2. 生成 correspondPath（RSA-OAEP 加密时间戳）
+ * 3. 获取 refresh_csrf
+ * 4. POST cookie/refresh 获取新 Cookie 与新 refresh_token
+ * 5. POST confirm/refresh 使旧 refresh_token 失效（失败可忽略）
+ */
+export async function refreshBilibiliCookie(
+  cookie: string,
+  refreshToken: string,
+): Promise<CookieRefreshResult> {
+  // 1. 检查是否需要刷新
+  const check = await checkCookieRefresh(cookie)
+  if (!check.refresh) {
+    return { cookie, refreshToken, refreshed: false }
+  }
+
+  // 2. 生成 correspondPath（使用检查接口返回的时间戳）
+  const correspondPath = generateCorrespondPath(check.timestamp)
+
+  // 3. 获取实时刷新口令
+  const refreshCsrf = await getRefreshCsrf(correspondPath, cookie)
+
+  // 4. 刷新 Cookie（必须先保存旧 refresh_token 备用）
+  const oldRefreshToken = refreshToken
+  const csrf = getCookieValue(cookie, 'bili_jct') || ''
+  const refreshResponse = await fetch(`${PASSPORT_BASE}/x/passport-login/web/cookie/refresh`, {
+    method: 'POST',
+    headers: {
+      ...DEFAULT_HEADERS,
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Cookie: cookie,
+    },
+    body: new URLSearchParams({
+      csrf,
+      refresh_csrf: refreshCsrf,
+      source: 'main_web',
+      refresh_token: oldRefreshToken,
+    }),
+  })
+
+  if (!refreshResponse.ok) {
+    throw createError({
+      statusCode: 502,
+      message: `B站Cookie刷新失败: HTTP ${refreshResponse.status}`,
+    })
+  }
+
+  const refreshBody = await refreshResponse.json() as {
+    code: number
+    message: string
+    data?: { refresh_token?: string }
+  }
+
+  if (refreshBody.code !== 0) {
+    throw createError({
+      statusCode: 502,
+      message: `B站Cookie刷新失败 [${refreshBody.code}]: ${refreshBody.message}`,
+    })
+  }
+
+  // 从 Set-Cookie 响应头提取新 Cookie 字符串
+  const setCookieHeaders = refreshResponse.headers.getSetCookie?.() || []
+  if (setCookieHeaders.length === 0) {
+    throw createError({
+      statusCode: 502,
+      message: 'B站Cookie刷新失败: 响应中未返回新 Cookie',
+    })
+  }
+  const newCookie = setCookieHeaders
+    .map((h) => h.split(';')[0])
+    .join('; ')
+  const newRefreshToken = refreshBody.data?.refresh_token || oldRefreshToken
+
+  // 5. 确认更新：使旧 refresh_token 对应的 Cookie 失效（失败不影响本次刷新结果）
+  try {
+    const newCsrf = getCookieValue(newCookie, 'bili_jct') || ''
+    await fetch(`${PASSPORT_BASE}/x/passport-login/web/confirm/refresh`, {
+      method: 'POST',
+      headers: {
+        ...DEFAULT_HEADERS,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Cookie: newCookie,
+      },
+      body: new URLSearchParams({
+        csrf: newCsrf,
+        refresh_token: oldRefreshToken,
+      }),
+    })
+  } catch {
+    console.warn('[refreshBilibiliCookie] confirm/refresh 失败（旧 token 未失效，可忽略）')
+  }
+
+  return { cookie: newCookie, refreshToken: newRefreshToken, refreshed: true }
 }

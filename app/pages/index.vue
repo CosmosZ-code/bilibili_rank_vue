@@ -3,9 +3,23 @@
     <ClientOnly>
       <BannerContainer :initial-banners="bannerData" />
       <template #fallback>
-        <div style="min-height: 155px; height: 10vw; max-height: 240px; background: var(--b-blue);"></div>
+        <div class="banner-fallback"></div>
       </template>
     </ClientOnly>
+
+    <!-- 移动端顶部导航条（Banner 在 <=768px 隐藏，登录入口移到这里） -->
+    <MobileTopBar />
+
+    <!-- 移动端侧栏（收纳搜索/过滤/已屏蔽UP，仅 <=768px 显示） -->
+    <MobileSidebar
+      :searchTerm="activeSearchTerm"
+      :purifyPercent="purifyPercent"
+      :blockedUps="blockedUps"
+      :viewMode="viewMode"
+      @update:searchTerm="onSearchTermChange"
+      @update:purifyPercent="purifyPercent = $event"
+      @unblock="unblock"
+    />
 
     <div class="container">
       <RankingControls
@@ -557,6 +571,26 @@ function onBackToTop() {
 </script>
 
 <style scoped>
+/* Banner SSR 占位（与 BannerContainer 视觉一致） */
+.banner-fallback {
+  min-height: 155px;
+  height: 10vw;
+  max-height: 240px;
+  background: var(--b-blue);
+}
+
+@media (max-width: 768px) {
+  /* 移动端 Banner 整体隐藏，占位一并隐藏 */
+  .banner-fallback {
+    display: none;
+  }
+
+  /* 补偿移动端固定顶部条（44px）的高度 */
+  .container {
+    padding-top: 44px;
+  }
+}
+
 .update-time {
   text-align: center;
   margin-top: 20px;
