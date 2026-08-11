@@ -142,14 +142,28 @@ function onDocumentClick(e: MouseEvent) {
   }
 }
 
+// 移动端顶栏场景：页面滚动时关闭用户菜单（顶栏收回后菜单不残留）。
+// 桌面 BannerNav 中的登录菜单为 hover 控制 + 非 fixed 定位，无此问题
+let onScrollClose: (() => void) | null = null
+
 onMounted(() => {
   document.addEventListener('click', onDocumentClick)
   document.addEventListener('visibilitychange', onVisibilityChange)
+
+  if (window.matchMedia('(max-width: 768px)').matches) {
+    onScrollClose = () => {
+      isMenuOpen.value = false
+    }
+    window.addEventListener('scroll', onScrollClose, { passive: true })
+  }
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', onDocumentClick)
   document.removeEventListener('visibilitychange', onVisibilityChange)
+  if (onScrollClose) {
+    window.removeEventListener('scroll', onScrollClose)
+  }
 })
 let qrcodeKey = ''
 let qrCookies = ''
@@ -345,10 +359,10 @@ onMounted(() => {
   white-space: nowrap;
 }
 
-/* 移动端：顶栏为透明底（MobileTopBar），用户名改用灰色 */
+/* 移动端：顶栏空间有限，只显示头像不显示用户名 */
 @media (max-width: 768px) {
   .username {
-    color: var(--b-gray);
+    display: none;
   }
 }
 

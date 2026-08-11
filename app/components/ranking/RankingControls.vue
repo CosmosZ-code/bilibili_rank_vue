@@ -53,50 +53,15 @@
     <!-- 搜索框（移动端移至侧栏，仅桌面端显示） -->
     <SearchBox class="controls-search" :modelValue="searchTerm" @update:modelValue="$emit('update:searchTerm', $event)" />
 
-    <!-- 排序/切换区 — sort-btn 风格的两个按钮 -->
-    <div class="sort-options">
-      <div class="tab-group">
-        <!-- 视频 -->
-        <button
-          class="tab-btn"
-          :class="{ active: viewMode === 'videos' }"
-          @click="$emit('update:viewMode', 'videos')"
-        >
-          视频
-        </button>
-
-        <!-- 直播（带悬浮分区下拉） -->
-        <div
-          ref="liveDropdownRef"
-          class="live-dropdown"
-          :class="{ active: viewMode === 'live' }"
-          @mouseenter="onDropdownEnter"
-          @mouseleave="onDropdownLeave"
-        >
-          <span class="live-trigger" @click="clickLive">直播</span>
-          <Transition name="fade">
-            <div v-if="dropdownOpen" class="dropdown-menu" @mouseenter="onDropdownEnter">
-              <div
-                class="dropdown-item"
-                :class="{ active: areaId === 0 }"
-                @click="selectArea(0)"
-              >
-                全站
-              </div>
-              <div
-                v-for="area in areas"
-                :key="area.id"
-                class="dropdown-item"
-                :class="{ active: areaId === area.id }"
-                @click="selectArea(area.id)"
-              >
-                {{ area.name }}
-              </div>
-            </div>
-          </Transition>
-        </div>
-      </div>
-    </div>
+    <!-- 视图切换（视频/直播 + 分区下拉）— 与移动顶栏共用 ViewSwitch -->
+    <ViewSwitch
+      class="controls-view-switch"
+      :view-mode="viewMode"
+      :area-id="areaId"
+      :areas="areas"
+      @update:view-mode="$emit('update:viewMode', $event)"
+      @update:area-id="$emit('update:areaId', $event)"
+    />
   </div>
 </template>
 
@@ -121,53 +86,6 @@ const emit = defineEmits<{
 }>()
 
 // ============================================================
-// 触屏设备检测 + 两阶段点按
-// ============================================================
-const { isTouch } = useTouchDevice()
-const liveDropdownRef = ref<HTMLDivElement | null>(null)
-
-// 悬浮下拉状态（桌面：hover 控制；触屏：点击控制）
-const dropdownOpen = ref(false)
-let closeTimer: ReturnType<typeof setTimeout> | null = null
-
-function onDropdownEnter() {
-  if (isTouch.value) return
-  if (closeTimer) {
-    clearTimeout(closeTimer)
-    closeTimer = null
-  }
-  dropdownOpen.value = true
-}
-
-function onDropdownLeave() {
-  if (isTouch.value) return
-  closeTimer = setTimeout(() => {
-    dropdownOpen.value = false
-  }, 200)
-}
-
-function selectArea(id: number) {
-  if (props.viewMode !== 'live') {
-    emit('update:viewMode', 'live')
-  }
-  emit('update:areaId', id)
-  dropdownOpen.value = false
-}
-
-// 点击"直播"文字：桌面直接切全站；触屏两阶段（首次展开，二次切全站）
-function clickLive() {
-  const { shouldOpen, shouldTriggerAction } = computeTriggerTap(isTouch.value, dropdownOpen.value)
-  if (shouldOpen) {
-    dropdownOpen.value = true
-    if (!shouldTriggerAction) return
-  }
-  // 桌面点击 或 触屏二次点击：切直播全站
-  emit('update:viewMode', 'live')
-  emit('update:areaId', 0)
-  dropdownOpen.value = false
-}
-
-// ============================================================
 // 已屏蔽UP 下拉（点击模式，全设备）
 // ============================================================
 const blacklistOpen = ref(false)
@@ -189,13 +107,8 @@ const {
   pageItems: blacklistPageItems,
 } = useBlacklistPanel(toRef(props, 'blockedUps'))
 
-// 点击 document 外部关闭下拉（直播下拉仅触屏；黑名单下拉全设备）
+// 点击 document 外部关闭黑名单下拉（全设备）
 function onDocumentClick(e: MouseEvent) {
-  if (isTouch.value && dropdownOpen.value) {
-    if (isClickOutside(e.target as Node, [liveDropdownRef.value])) {
-      dropdownOpen.value = false
-    }
-  }
   if (blacklistOpen.value) {
     if (isClickOutside(e.target as Node, [blacklistDropdownRef.value])) {
       blacklistOpen.value = false
@@ -423,96 +336,10 @@ onUnmounted(() => {
   background: #b0b0b0;
 }
 
-/* ==================== 视图标签切换（sort-btn 风格） ==================== */
-.sort-options {
-  display: flex;
-  gap: 10px;
+/* ==================== 视图切换（ViewSwitch 组件） ==================== */
+/* 容器间距保持原 sort-options 的 margin */
+.controls-view-switch {
   margin: 10px 0;
-}
-
-.tab-group {
-  display: flex;
-  gap: 0;
-  border-radius: 4px;
-  overflow: visible;
-  position: relative;
-}
-
-.tab-btn,
-.live-trigger {
-  background-color: #fff;
-  color: #999;
-  border: 1px solid #ddd;
-  padding: 8px 18px;
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.3s;
-  white-space: nowrap;
-  display: inline-block;
-}
-
-.tab-btn:first-child {
-  border-radius: 4px 0 0 4px;
-}
-
-/* 直播触发器和它外侧包装共享右边框，形成一个连续的分组按钮 */
-.live-dropdown {
-  margin-left: -1px; /* 与左边按钮边框重叠 */
-  position: relative;
-}
-
-.live-trigger {
-  cursor: pointer;
-  border-radius: 0 4px 4px 0;
-}
-
-.tab-btn:hover,
-.live-dropdown:not(.active) .live-trigger:hover {
-  background-color: var(--b-pink);
-  color: white;
-  border-color: var(--b-pink);
-}
-
-.tab-btn.active,
-.live-dropdown.active .live-trigger {
-  background-color: var(--b-pink);
-  color: white;
-  border-color: var(--b-pink);
-}
-
-.dropdown-menu {
-  position: absolute;
-  top: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  margin-top: 4px;
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  min-width: max-content;
-  width: auto;
-  z-index: 200;
-  padding: 8px 0;
-}
-
-.dropdown-item {
-  padding: 10px 24px;
-  font-size: 14px;
-  color: #333;
-  cursor: pointer;
-  transition: background-color 0.15s, color 0.15s;
-  white-space: nowrap;
-  text-align: center;
-}
-
-.dropdown-item:hover {
-  background-color: #f5f5f5;
-  color: var(--b-pink);
-}
-
-.dropdown-item.active {
-  color: var(--b-pink);
-  font-weight: 600;
 }
 
 /* 淡入淡出过渡 */
@@ -526,21 +353,11 @@ onUnmounted(() => {
   opacity: 0;
 }
 
-/* 移动端：仅保留 [视频|直播] 切换，其余控件收纳进侧栏（MobileSidebar）。
+/* 移动端：整个控制栏隐藏（切换按钮移至顶栏 MobileTopBar，其余控件收纳进侧栏）。
    置于文件末尾，保证媒体查询规则不被前面同特异性规则覆盖 */
 @media (max-width: 768px) {
-  .b-head,
-  .blacklist-dropdown,
-  .controls-percent,
-  .controls-search {
+  .controls {
     display: none;
-  }
-
-  /* 切换按钮靠右，与网格 gap 协调 */
-  .sort-options {
-    margin: 0;
-    margin-left: auto;
-    margin-right: 12px;
   }
 }
 </style>

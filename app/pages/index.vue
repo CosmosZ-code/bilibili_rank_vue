@@ -8,7 +8,13 @@
     </ClientOnly>
 
     <!-- 移动端顶部导航条（Banner 在 <=768px 隐藏，登录入口移到这里） -->
-    <MobileTopBar />
+    <MobileTopBar
+      :viewMode="viewMode"
+      :areaId="areaId"
+      :areas="areas"
+      @update:viewMode="onViewModeChange"
+      @update:areaId="areaId = $event"
+    />
 
     <!-- 移动端侧栏（收纳搜索/过滤/已屏蔽UP，仅 <=768px 显示） -->
     <MobileSidebar

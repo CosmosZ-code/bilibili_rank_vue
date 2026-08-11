@@ -7,16 +7,41 @@
         <line x1="4" y1="18" x2="20" y2="18" />
       </svg>
     </button>
+
+    <!-- 视频/直播切换（compact 透明描边样式，绝对居中） -->
+    <ViewSwitch
+      class="topbar-switch"
+      compact
+      :view-mode="viewMode"
+      :area-id="areaId"
+      :areas="areas"
+      @update:view-mode="$emit('update:viewMode', $event)"
+      @update:area-id="$emit('update:areaId', $event)"
+    />
+
     <BilibiliLogin />
   </div>
 </template>
 
 <script setup lang="ts">
+import type { ViewMode, LiveArea } from '../../types'
+
 // 移动端顶部导航条：仅手机端显示。
 // BannerContainer 在 <=768px 时整体隐藏（含桌面导航栏与登录按钮），
 // 因此这里提供独立的登录入口。
 // 交互：向下滚动自动隐藏（避免遮挡内容），向上滚动重新显示（顶部区域常驻）。
-// 左侧汉堡按钮展开侧栏（MobileSidebar：收纳搜索/过滤/已屏蔽UP 控件）。
+// 布局：☰ 侧栏按钮（左）｜视频/直播切换（中）｜登录/头像（右）。
+
+defineProps<{
+  viewMode: ViewMode
+  areaId: number
+  areas: LiveArea[]
+}>()
+
+defineEmits<{
+  'update:viewMode': [value: ViewMode]
+  'update:areaId': [value: number]
+}>()
 
 const { toggle } = useMobileDrawer()
 
@@ -68,8 +93,8 @@ onUnmounted(() => {
   right: 0;
   height: 44px;
   padding: 0 14px;
-  /* 透明底 + 毛玻璃：模糊透过的内容，本身不设底色 */
-  background: transparent;
+  /* 透明白底 + 毛玻璃：白底半透明，模糊透过的内容 */
+  background: rgba(255, 255, 255, 0.85);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   z-index: 200;
@@ -79,6 +104,13 @@ onUnmounted(() => {
 /* 向下滚动后隐藏（移出屏幕） */
 .mobile-top-bar--hidden {
   transform: translateY(-100%);
+}
+
+/* 切换按钮绝对居中（不受左右元素宽度影响） */
+.topbar-switch {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
 }
 
 .menu-btn {

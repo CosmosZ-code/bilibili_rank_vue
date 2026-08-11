@@ -154,12 +154,12 @@ describe('组件触屏适配代码结构验证', () => {
     })
   })
 
-  describe('RankingControls.vue — 直播下拉触屏适配', () => {
+  describe('ViewSwitch.vue — 直播下拉触屏适配（自 RankingControls 迁移）', () => {
     let content = ''
 
     beforeAll(async () => {
       const fs = await import('node:fs/promises')
-      content = await fs.readFile(resolve(rootDir, 'app/components/ranking/RankingControls.vue'), 'utf-8')
+      content = await fs.readFile(resolve(rootDir, 'app/components/ranking/ViewSwitch.vue'), 'utf-8')
     })
 
     it('引入 useTouchDevice', () => {

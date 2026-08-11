@@ -18,6 +18,7 @@ const expectedComponents = [
   'ranking/VideoGrid.vue',
   'ranking/VideoCard.vue',
   'ranking/VideoCardSkeleton.vue',
+  'ranking/ViewSwitch.vue',
   'common/BackToTop.vue',
   'common/SearchBox.vue',
   'common/PercentFilter.vue',
@@ -100,13 +101,14 @@ describe('组件关键内容验证', () => {
     expect(content).toContain('768px')
   })
 
-  it('RankingControls 包含搜索、排序、过滤三种控件', async () => {
+  it('RankingControls 包含搜索、过滤、视图切换控件', async () => {
     const fs = await import('node:fs/promises')
     const content = await fs.readFile(resolve(componentsDir, 'ranking/RankingControls.vue'), 'utf-8')
     expect(content).toContain('SearchBox')
-    expect(content).toContain('sort-options')
     // 过滤滑块已抽为 PercentFilter 组件（RankingControls 引用之）
     expect(content).toContain('PercentFilter')
+    // 视图切换（视频/直播）已抽为 ViewSwitch 组件
+    expect(content).toContain('ViewSwitch')
   })
 
   it('PercentFilter 包含过滤等级滑块（原内联样式迁移至组件）', async () => {
@@ -129,24 +131,36 @@ describe('组件关键内容验证', () => {
     expect(content).toContain('sticky')
   })
 
-  it('MobileTopBar 包含汉堡按钮（展开侧栏）', async () => {
+  it('MobileTopBar 包含汉堡按钮（展开侧栏）与视图切换', async () => {
     const fs = await import('node:fs/promises')
     const content = await fs.readFile(resolve(componentsDir, 'nav/MobileTopBar.vue'), 'utf-8')
     expect(content).toContain('menu-btn')
     expect(content).toContain('useMobileDrawer')
+    // 视频/直播切换按钮置于顶栏（ViewSwitch compact 居中）
+    expect(content).toContain('ViewSwitch')
+    expect(content).toContain('compact')
   })
 
-  it('RankingControls 包含触屏两阶段点按逻辑', async () => {
+  it('RankingControls 保留黑名单点击外部关闭逻辑', async () => {
     const fs = await import('node:fs/promises')
     const content = await fs.readFile(resolve(componentsDir, 'ranking/RankingControls.vue'), 'utf-8')
+    expect(content).toContain('onDocumentClick')
+    expect(content).toContain('blacklistDropdownRef')
+  })
+
+  it('ViewSwitch 包含触屏两阶段点按逻辑（桌面控制栏与移动顶栏共用）', async () => {
+    const fs = await import('node:fs/promises')
+    const content = await fs.readFile(resolve(componentsDir, 'ranking/ViewSwitch.vue'), 'utf-8')
     // 引入触屏检测
     expect(content).toContain('useTouchDevice')
     // 两阶段点按：computeTriggerTap 替换了原有内联判断
     expect(content).toContain('computeTriggerTap')
-    // 点击外部关闭
-    expect(content).toContain('onDocumentClick')
     // hover 处理函数包含 isTouch 守卫（防止 iOS 模拟 mouseenter 干扰）
     expect(content).toContain('if (isTouch.value) return')
+    // 直播分区下拉
+    expect(content).toContain('dropdown-menu')
+    // 顶栏紧凑模式（透明描边按钮）
+    expect(content).toContain('compact')
   })
 
   it('HistoryDropdown 包含触屏点按适配（Teleported 面板）', async () => {
