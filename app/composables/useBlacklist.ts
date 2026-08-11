@@ -40,6 +40,16 @@ export function sortBlacklistByOwner(list: BlacklistItem[]): BlacklistItem[] {
   return [...list].sort((a, b) => a.owner.localeCompare(b.owner, 'zh'))
 }
 
+/**
+ * 判断两个黑名单列表是否包含相同 mid（忽略顺序与 owner 名差异）。
+ * 用于 DB 同步时避免「内容相同但引用不同」触发无意义的列表刷新。
+ */
+export function hasSameBlockedMids(a: BlacklistItem[], b: BlacklistItem[]): boolean {
+  if (a.length !== b.length) return false
+  const mids = new Set(a.map((x) => x.mid))
+  return b.every((x) => mids.has(x.mid))
+}
+
 // ============================================================
 // Composable（模块级单例）
 // ============================================================
@@ -74,7 +84,11 @@ export function useBlacklist() {
       try {
         const res = await $fetch<{ items: BlacklistItem[] }>('/api/user/blacklist')
         if (res.items?.length) {
-          blockedUps.value = res.items
+          // 仅内容实际变化才覆盖：无条件赋新数组会让 index.vue 的
+          // watch([..., blockedUps]) 每次都触发一次多余的 replace GET
+          if (!hasSameBlockedMids(res.items, blockedUps.value)) {
+            blockedUps.value = res.items
+          }
         } else if (blockedUps.value.length) {
           $fetch('/api/user/blacklist', {
             method: 'PUT',

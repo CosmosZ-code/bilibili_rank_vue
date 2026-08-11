@@ -388,4 +388,59 @@ describe('getOrFetchPersonalized — 缓存策略与在途去重', () => {
     expect(Object.keys(second!)).toEqual(['BV_a'])
     expect(mockGetPopular).toHaveBeenCalledTimes(2)
   })
+
+  // ============================================================
+  // 失败路径：不回退过期数据（GET /api/ranking 与 POST 行为一致的回归防护）
+  // ============================================================
+
+  it('过期缓存 + 拉取失败 → 返回 null，且不写回旧缓存（不续期）', async () => {
+    const { setItem } = setupStorage({
+      data: { BV_old: makeVideo({ count_num: 800 }) },
+      cids: { BV_old: 111 },
+      timestamp: Date.now() - 2 * 60 * 60 * 1000, // 2 小时前（已过期）
+    })
+    // B站 请求失败（fetchPersonalizedOnly 内部吞错 → 返回 null）
+    mockGetPopular.mockRejectedValue(new Error('B站风控 -352'))
+
+    const result = await getOrFetchPersonalized(user, 'cookie')
+
+    expect(result).toBeNull()
+    // 不回退、不续期：setItem 不应被调用（否则 GET 会持续合并过期数据，污染榜单）
+    expect(setItem).not.toHaveBeenCalled()
+  })
+
+  it('过期缓存 + 拉取结果为空（热门榜空）→ 返回 null', async () => {
+    const { setItem } = setupStorage({
+      data: { BV_old: makeVideo({ count_num: 800 }) },
+      timestamp: Date.now() - 60 * 60 * 1000, // 1 小时前（已过期）
+    })
+    mockGetPopular.mockResolvedValue([]) // 热门榜为空 → fetchPersonalizedOnly 返回 null
+
+    const result = await getOrFetchPersonalized(user, 'cookie')
+
+    expect(result).toBeNull()
+    expect(setItem).not.toHaveBeenCalled()
+  })
+
+  it('过期缓存 + 拉取成功 → 返回新数据并写回缓存（续期时间戳）', async () => {
+    const staleTimestamp = Date.now() - 60 * 60 * 1000 // 1 小时前（已过期）
+    const { setItem } = setupStorage({
+      data: { BV_old: makeVideo({ count_num: 800 }) },
+      cids: { BV_old: 111 },
+      timestamp: staleTimestamp,
+    })
+    mockGetPopular.mockResolvedValue([makePopularVideo('BV_new', 222)])
+    mockGetOnlineCount.mockResolvedValue({ formatted: '800+', raw: 800 })
+
+    const result = await getOrFetchPersonalized(user, 'cookie')
+
+    // 新数据返回；旧视频（≥500）防淘汰保留
+    expect(result).not.toBeNull()
+    expect(Object.keys(result!)).toEqual(expect.arrayContaining(['BV_old', 'BV_new']))
+
+    // 成功路径写回缓存，时间戳续期（后续 GET /api/ranking 可合并）
+    const [key, entry] = setItem.mock.calls[0]
+    expect(key).toBe('personalized:123')
+    expect(entry.timestamp).toBeGreaterThan(staleTimestamp)
+  })
 })

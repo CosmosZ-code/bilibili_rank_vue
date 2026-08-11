@@ -33,7 +33,8 @@ export default defineEventHandler(async (event) => {
     return Object.entries(data).map(([bvid, info]) => ({ bvid, ...info }))
   }
 
-  // 统一缓存策略：新鲜返回缓存，过期拉取，失败回退旧缓存
+  // 统一缓存策略：新鲜返回缓存，过期拉取；失败返回空 added（不回退过期数据，
+  // 与 GET /api/ranking 的 TTL 合并条件保持一致，避免客户端合并的卡片被后续 replace 刷掉）
   const data = await getOrFetchPersonalized(user, cookie)
   const added = data ? toAdded(data) : []
 

@@ -59,7 +59,9 @@ const inflightPersonalized = new Map<number, Promise<VideosDataMap | null>>()
  *
  * - 缓存新鲜（5 分钟内）→ 直接返回缓存（零 B站 请求）
  * - 缓存过期 → 拉取 B站 并写缓存
- * - 拉取失败 → 返回旧缓存（不覆盖），无缓存则返回 null
+ * - 拉取失败 → 返回 null，不回退过期数据（与 GET /api/ranking 的 TTL
+ *   合并条件保持一致——否则客户端 POST 合并的过期卡片会被后续 replace 的
+ *   GET 响应刷掉，出现「闪现后消失」；同时避免长期失败导致过期数据污染榜单）
  * - 同用户并发调用 → 复用同一在途 Promise，不重复请求
  */
 export async function getOrFetchPersonalized(
@@ -92,8 +94,11 @@ export async function getOrFetchPersonalized(
       // 拉取失败静默，不覆盖旧缓存
     }
 
-    // 拉取失败 → 返回旧缓存（若有）
-    return cached?.data ?? null
+    // 拉取失败或结果为空 → 不回退旧缓存（返回 null）：
+    // 旧缓存已过期，POST 若回退展示，客户端合并的卡片会被后续 replace 的
+    // GET 响应刷掉（GET 按 TTL 跳过过期缓存）；长期失败还会长期展示过期数据。
+    // 过期后每次调用都会重试拉取，成功后自动替换为新鲜数据。
+    return null
   })()
   inflightPersonalized.set(user.id, task)
   try {

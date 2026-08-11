@@ -5,7 +5,12 @@
  * （不依赖 Nuxt 运行时，沿用项目 -pure 测试惯例）
  */
 import { describe, it, expect } from 'vitest'
-import { toggleBlockFromList, removeFromList, sortBlacklistByOwner } from '../../app/composables/useBlacklist'
+import {
+  toggleBlockFromList,
+  removeFromList,
+  sortBlacklistByOwner,
+  hasSameBlockedMids,
+} from '../../app/composables/useBlacklist'
 import type { BlacklistItem } from '../../app/types'
 
 const UP_A: BlacklistItem = { mid: '10001', owner: 'UP_A' }
@@ -90,5 +95,36 @@ describe('sortBlacklistByOwner — 按 UP 名首字排序（中文按拼音）',
 
   it('空列表返回空数组', () => {
     expect(sortBlacklistByOwner([])).toEqual([])
+  })
+})
+
+describe('hasSameBlockedMids — 内容比较（忽略顺序与 owner 名）', () => {
+  it('相同 mid 不同顺序 → true', () => {
+    expect(hasSameBlockedMids([UP_A, UP_B], [UP_B, UP_A])).toBe(true)
+  })
+
+  it('同 mid 不同 owner 名 → true（以 mid 判断）', () => {
+    const renamed = { mid: '10001', owner: '新名字' }
+    expect(hasSameBlockedMids([UP_A], [renamed])).toBe(true)
+  })
+
+  it('新增条目 → false', () => {
+    expect(hasSameBlockedMids([UP_A], [UP_A, UP_B])).toBe(false)
+  })
+
+  it('移除条目 → false', () => {
+    expect(hasSameBlockedMids([UP_A, UP_B], [UP_A])).toBe(false)
+  })
+
+  it('替换条目 → false', () => {
+    expect(hasSameBlockedMids([UP_A], [UP_B])).toBe(false)
+  })
+
+  it('两个空列表 → true', () => {
+    expect(hasSameBlockedMids([], [])).toBe(true)
+  })
+
+  it('一个为空一个非空 → false', () => {
+    expect(hasSameBlockedMids([], [UP_A])).toBe(false)
   })
 })

@@ -67,6 +67,9 @@ export default defineEventHandler(async (event) => {
   if (user) {
     const personalCache = await getPersonalizedCache(user.id)
     if (personalCache?.data && Date.now() - personalCache.timestamp < PERSONALIZED_CACHE_TTL) {
+      // 先克隆再合并：cached.data 是共享全局缓存对象的引用，
+      // 直接写入会把用户个性化视频污染进匿名缓存（泄露 + 缩小拉取排除集）
+      dataMap = { ...dataMap }
       for (const [bvid, info] of Object.entries(personalCache.data)) {
         if (!dataMap[bvid]) {
           dataMap[bvid] = info
