@@ -6,7 +6,7 @@
 
   <!-- 左侧滑出面板：头部固定，内容区独立滚动 -->
   <Transition name="sidebar-slide">
-    <aside v-if="isOpen" class="sidebar">
+    <aside v-if="isOpen" ref="sidebarRef" class="sidebar">
       <header class="sidebar-header">
         <span class="sidebar-title">bilibili ranking</span>
         <button class="sidebar-close" aria-label="关闭菜单" @click="close">✕</button>
@@ -143,6 +143,7 @@ let historyFetched = false
 
 // 历史分页：首屏=第1页，下滑加载最多 HISTORY_MAX_PAGES 页（游标分页，每页约 20 条）
 const sidebarBodyRef = ref<HTMLElement | null>(null)
+const sidebarRef = ref<HTMLElement | null>(null)
 const historyPages = ref(1)
 const historyHasMore = computed(() => hasHistoryMorePages(hasMore.value, historyPages.value))
 
@@ -238,6 +239,12 @@ watch(isOpen, async (open) => {
   if (open) {
     await nextTick()
     attachScrollListeners()
+    // 安卓兜底：与 MobileTopBar 同方案，内联写入双前缀毛玻璃
+    // （aside 是 v-if 动态挂载的，只能在打开后写入）
+    if (sidebarRef.value) {
+      sidebarRef.value.style.backdropFilter = 'blur(8px)'
+      sidebarRef.value.style.webkitBackdropFilter = 'blur(8px)'
+    }
   } else {
     detachScrollListeners()
   }
@@ -270,18 +277,27 @@ onUnmounted(() => {
   z-index: 210;
 }
 
-/* 面板 */
+/* 面板：透明白底 + 毛玻璃（与 MobileTopBar 同款效果） */
 .sidebar {
   position: fixed;
   top: 0;
   left: 0;
   bottom: 0;
   width: min(280px, 82vw);
-  background: #fff;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   z-index: 220;
   display: flex;
   flex-direction: column;
   box-shadow: 2px 0 12px rgba(0, 0, 0, 0.15);
+}
+
+/* 完全不支持 backdrop-filter 的旧设备：近不透明白底，避免内容直接透出 */
+@supports not ((backdrop-filter: blur(8px)) or (-webkit-backdrop-filter: blur(8px))) {
+  .sidebar {
+    background: rgba(255, 255, 255, 0.97);
+  }
 }
 
 /* 头部固定（不参与内容滚动） */

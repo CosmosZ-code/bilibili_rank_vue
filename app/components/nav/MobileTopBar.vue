@@ -1,5 +1,5 @@
 <template>
-  <div class="mobile-top-bar" :class="{ 'mobile-top-bar--hidden': isHidden }">
+  <div ref="topBarRef" class="mobile-top-bar" :class="{ 'mobile-top-bar--hidden': isHidden }">
     <button class="menu-btn" aria-label="打开菜单" @click="toggle">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
         <line x1="4" y1="6" x2="20" y2="6" />
@@ -49,6 +49,8 @@ const isHidden = ref(false)
 let lastScrollY = 0
 let ticking = false
 
+const topBarRef = ref<HTMLElement>()
+
 function onScroll() {
   // rAF 节流，避免频繁触发样式更新
   if (ticking) return
@@ -73,6 +75,11 @@ function onScroll() {
 }
 
 onMounted(() => {
+  // 安卓部分浏览器对构建后的 scoped CSS backdrop-filter 渲染不稳定。
+  if (topBarRef.value) {
+    topBarRef.value.style.backdropFilter = 'blur(8px)'
+    topBarRef.value.style.webkitBackdropFilter = 'blur(8px)'
+  }
   lastScrollY = window.scrollY
   window.addEventListener('scroll', onScroll, { passive: true })
 })
@@ -99,6 +106,13 @@ onUnmounted(() => {
   -webkit-backdrop-filter: blur(8px);
   z-index: 200;
   transition: transform 0.3s ease;
+}
+
+/* 完全不支持 backdrop-filter 的旧设备：近不透明白底，避免内容直接透出（看起来透明） */
+@supports not ((backdrop-filter: blur(8px)) or (-webkit-backdrop-filter: blur(8px))) {
+  .mobile-top-bar {
+    background: rgba(255, 255, 255, 0.97);
+  }
 }
 
 /* 向下滚动后隐藏（移出屏幕） */
