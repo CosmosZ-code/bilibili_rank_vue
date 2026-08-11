@@ -30,15 +30,21 @@ export function useHistory() {
       // 解析 B站 API 标准响应
       if (data.code === 0 && data.data) {
         const result = data.data
-        const items: HistoryItem[] = (result.list || []).map((item: any) => ({
-          title: item.title || '',
-          bvid: item.bvid || item.history?.bvid || '',
-          cover: item.cover || item.covers?.[0] || '',
-          ownerName: item.author_name || item.owner?.name || '',
-          viewAt: item.view_at || 0,
-          progress: item.progress || 0,
-          duration: item.duration || 0,
-        }))
+        const items: HistoryItem[] = (result.list || []).map((item: any) => {
+          // 直播项 bvid 为空，直播间 ID 在 history.oid
+          const isLive = item.history?.business === 'live'
+          return {
+            title: item.title || '',
+            bvid: item.bvid || item.history?.bvid || '',
+            cover: item.cover || item.covers?.[0] || '',
+            ownerName: item.author_name || item.owner?.name || '',
+            viewAt: item.view_at || 0,
+            progress: item.progress || 0,
+            duration: item.duration || 0,
+            isLive,
+            roomId: isLive ? item.history?.oid : undefined,
+          }
+        })
 
         history.value = [...history.value, ...items]
         hasMore.value = result.has_more || false

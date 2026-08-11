@@ -43,9 +43,9 @@
       <!-- 视频列表 -->
       <div v-else class="history-list">
         <a
-          v-for="item in history"
-          :key="item.bvid"
-          :href="`https://www.bilibili.com/video/${item.bvid}`"
+          v-for="(item, index) in history"
+          :key="item.bvid || item.roomId || index"
+          :href="getHistoryLink(item)"
           target="_blank"
           class="history-card"
         >
@@ -66,6 +66,7 @@
             <span v-if="item.duration || item.progress" class="duration-badge">
               {{ formatDuration(effectiveProgress(item)) }}/{{ formatDuration(item.duration) }}
             </span>
+            <span v-else-if="item.isLive" class="duration-badge live-badge">直播</span>
           </div>
 
           <!-- 文本信息 -->
@@ -98,7 +99,7 @@
 </template>
 
 <script setup lang="ts">
-import { formatDuration, formatViewTime, progressPercent, effectiveProgress } from '../../utils/history'
+import { formatDuration, formatViewTime, progressPercent, effectiveProgress, getHistoryLink } from '../../utils/history'
 
 const { isLoggedIn } = useAuth()
 const { history, isLoading, error, fetchHistory } = useHistory()
@@ -363,6 +364,13 @@ function clearCloseTimer() {
   padding: 2px 4px;
   border-radius: 3px;
   font-family: monospace;
+}
+
+/* 直播徽章（直播项无时长，置于封面右上角） */
+.live-badge {
+  top: 4px;
+  bottom: auto;
+  background: var(--b-pink);
 }
 
 /* 文本信息区 */

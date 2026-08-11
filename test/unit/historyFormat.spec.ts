@@ -10,6 +10,7 @@ import {
   formatViewTime,
   progressPercent,
   effectiveProgress,
+  getHistoryLink,
 } from '../../app/utils/history'
 
 describe('formatDuration — 秒 → 时长文本', () => {
@@ -39,6 +40,29 @@ describe('effectiveProgress / progressPercent — 观看进度', () => {
     expect(progressPercent({ progress: 120, duration: 120 })).toBe(100)
     expect(progressPercent({ progress: 150, duration: 120 })).toBe(100)
     expect(progressPercent({ progress: 0, duration: 0 })).toBe(0)
+  })
+})
+
+describe('getHistoryLink — 历史卡片跳转链接', () => {
+  it('视频项 → 视频页链接', () => {
+    expect(getHistoryLink({ bvid: 'BV1xx411c7mD' })).toBe('https://www.bilibili.com/video/BV1xx411c7mD')
+  })
+
+  it('直播项（有 roomId）→ 直播间链接', () => {
+    expect(getHistoryLink({ bvid: '', isLive: true, roomId: 5050 })).toBe('https://live.bilibili.com/5050')
+  })
+
+  it('直播项优先于 bvid', () => {
+    expect(getHistoryLink({ bvid: 'BV1xx411c7mD', isLive: true, roomId: 5050 })).toBe('https://live.bilibili.com/5050')
+  })
+
+  it('直播项但无 roomId → 回退视频链接或空串', () => {
+    expect(getHistoryLink({ bvid: 'BV1xx411c7mD', isLive: true })).toBe('https://www.bilibili.com/video/BV1xx411c7mD')
+    expect(getHistoryLink({ bvid: '', isLive: true })).toBe('')
+  })
+
+  it('无任何标识 → 空串', () => {
+    expect(getHistoryLink({ bvid: '' })).toBe('')
   })
 })
 

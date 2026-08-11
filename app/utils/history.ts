@@ -30,6 +30,13 @@ export function effectiveProgress(item: { progress: number; duration: number }):
   return item.progress > 0 ? item.progress : item.duration
 }
 
+/** 生成历史卡片链接：直播项 → 直播间，视频项 → 视频页 */
+export function getHistoryLink(item: { bvid: string; isLive?: boolean; roomId?: number }): string {
+  if (item.isLive && item.roomId) return `https://live.bilibili.com/${item.roomId}`
+  if (item.bvid) return `https://www.bilibili.com/video/${item.bvid}`
+  return ''
+}
+
 /** 格式化观看时间（Unix 秒时间戳 → 相对时间） */
 export function formatViewTime(timestamp: number): string {
   if (!timestamp) return ''

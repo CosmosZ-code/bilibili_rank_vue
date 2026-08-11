@@ -86,7 +86,7 @@ export interface BannerDataSet {
 export interface HistoryItem {
   /** 视频标题 */
   title: string
-  /** BV 号 */
+  /** BV 号（直播项为空） */
   bvid: string
   /** 封面图 */
   cover: string
@@ -98,6 +98,10 @@ export interface HistoryItem {
   progress: number
   /** 总时长（秒） */
   duration: number
+  /** 是否为直播项（history.business === 'live'） */
+  isLive?: boolean
+  /** 直播间 ID（仅直播项，取 history.oid） */
+  roomId?: number
 }
 
 /** B站收藏夹 */
