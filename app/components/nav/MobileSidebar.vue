@@ -12,7 +12,7 @@
         <button class="sidebar-close" aria-label="关闭菜单" @click="close">✕</button>
       </header>
 
-      <div class="sidebar-body">
+      <div ref="sidebarBodyRef" class="sidebar-body">
         <SearchBox :modelValue="searchTerm" @update:modelValue="$emit('update:searchTerm', $event)" />
 
         <!-- 过滤等级（仅视频模式生效，直播无过滤概念） -->
@@ -52,7 +52,6 @@
             @click="historyOpen = !historyOpen"
           >
             <span class="menu-toggle-name">观看历史</span>
-            <span v-if="history.length" class="menu-count">{{ history.length }}</span>
             <span class="menu-arrow" :class="{ open: historyOpen }">▾</span>
           </button>
           <Transition name="fade">
@@ -64,8 +63,8 @@
                 <div class="history-spinner"></div>
                 <p>加载中...</p>
               </div>
-              <!-- 加载失败 -->
-              <div v-else-if="error" class="history-empty history-error">{{ error }}</div>
+              <!-- 加载失败（列表已有数据时保留列表，可重试） -->
+              <div v-else-if="error && history.length === 0" class="history-empty history-error">{{ error }}</div>
               <!-- 空列表 -->
               <div v-else-if="history.length === 0" class="history-empty">暂无观看记录</div>
               <!-- 视频列表 -->
@@ -97,11 +96,14 @@
                     </div>
                   </div>
                 </a>
-                <a
-                  href="https://www.bilibili.com/history"
-                  target="_blank"
-                  class="history-view-all"
-                >查看全部</a>
+                <!-- 下滑加载下一页（与视频卡片交互一致），最多 HISTORY_MAX_PAGES 页 -->
+                <div v-if="historyHasMore" class="history-load-more" @click="loadMoreHistory">
+                  <span v-if="isLoading">加载中...</span>
+                  <span v-else>下滑加载更多...</span>
+                </div>
+                <div v-else class="history-load-more history-load-more--end">
+                  已展示全部 {{ history.length }} 条记录
+                </div>
               </template>
             </div>
           </Transition>
@@ -133,11 +135,26 @@ const { isOpen, close } = useMobileDrawer()
 
 // 观看历史（数据与桌面 HistoryDropdown 同源）
 const { isLoggedIn } = useAuth()
-const { history, isLoading, error, fetchHistory } = useHistory()
+const { history, isLoading, error, hasMore, fetchHistory, loadMore } = useHistory()
 
 // 观看历史折叠菜单（默认展开，与已屏蔽UP 默认收起相对）
 const historyOpen = ref(true)
 let historyFetched = false
+
+// 历史分页：首屏=第1页，下滑加载最多 HISTORY_MAX_PAGES 页（游标分页，每页约 20 条）
+const sidebarBodyRef = ref<HTMLElement | null>(null)
+const historyPages = ref(1)
+const historyHasMore = computed(() => hasHistoryMorePages(hasMore.value, historyPages.value))
+
+/**
+ * 加载下一页历史（点击加载条或下滑到底触发）
+ * 失败不消耗页数，加载条回到可重试状态
+ */
+async function loadMoreHistory() {
+  if (!historyHasMore.value || isLoading.value) return
+  await loadMore()
+  if (!error.value) historyPages.value++
+}
 
 // 黑名单折叠菜单（默认收起，与桌面下拉交互一致）
 const blacklistOpen = ref(false)
@@ -165,6 +182,67 @@ watch(isOpen, (open) => {
   }
 })
 
+// ============================================================
+// 历史下滑加载下一页（与视频卡片逻辑一致）：仅当"继续下滑"且
+// 侧栏内容区滚到底部时触发；监听器挂在 .sidebar-body 上
+// ============================================================
+let lastTouchY = 0
+
+function historyAtBottom() {
+  const el = sidebarBodyRef.value
+  if (!el) return false
+  return el.scrollTop + el.clientHeight >= el.scrollHeight - 5
+}
+
+function shouldLoadHistory() {
+  return isOpen.value && historyOpen.value && historyHasMore.value && !isLoading.value
+}
+
+function onWheel(e: WheelEvent) {
+  if (e.deltaY <= 0) return
+  if (!shouldLoadHistory()) return
+  if (historyAtBottom()) loadMoreHistory()
+}
+
+function onTouchStart(e: TouchEvent) {
+  lastTouchY = e.touches[0].clientY
+}
+
+function onTouchMove(e: TouchEvent) {
+  const currentY = e.touches[0].clientY
+  const deltaY = lastTouchY - currentY
+  lastTouchY = currentY
+  if (deltaY <= 0) return // 只响应"继续下滑"
+  if (!shouldLoadHistory()) return
+  if (historyAtBottom()) loadMoreHistory()
+}
+
+function attachScrollListeners() {
+  const el = sidebarBodyRef.value
+  if (!el) return
+  el.addEventListener('wheel', onWheel, { passive: true })
+  el.addEventListener('touchstart', onTouchStart, { passive: true })
+  el.addEventListener('touchmove', onTouchMove, { passive: true })
+}
+
+function detachScrollListeners() {
+  const el = sidebarBodyRef.value
+  if (!el) return
+  el.removeEventListener('wheel', onWheel)
+  el.removeEventListener('touchstart', onTouchStart)
+  el.removeEventListener('touchmove', onTouchMove)
+}
+
+// 抽屉打开（aside v-if 挂载）后给内容区挂监听，关闭时移除
+watch(isOpen, async (open) => {
+  if (open) {
+    await nextTick()
+    attachScrollListeners()
+  } else {
+    detachScrollListeners()
+  }
+})
+
 // Esc 关闭抽屉
 function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') close()
@@ -178,6 +256,7 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('keydown', onKeydown)
   window.removeEventListener('resize', syncBodyLock)
+  detachScrollListeners()
   document.body.style.overflow = '' // 兜底恢复（组件卸载时）
 })
 </script>
@@ -298,8 +377,9 @@ onUnmounted(() => {
   border-color: var(--b-pink);
 }
 
-/* 已屏蔽UP 标题：sticky 吸顶到内容区顶部（抵消 .sidebar-body 的 padding），
+/* 折叠菜单标题：sticky 吸顶到内容区顶部（抵消 .sidebar-body 的 padding），
    长列表下滑时维持顶部 */
+.history-toggle,
 .blacklist-toggle {
   position: sticky;
   top: -12px;
@@ -439,20 +519,29 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-.history-view-all {
-  display: block;
+/* 下滑加载更多（与视频卡片加载条交互一致，侧栏内紧凑版） */
+.history-load-more {
   text-align: center;
-  padding: 10px 12px;
+  padding: 12px;
   font-size: 13px;
-  color: #666;
-  text-decoration: none;
-  border-top: 1px solid #eee;
-  transition: background-color 0.15s, color 0.15s;
+  color: #99a2aa;
+  cursor: pointer;
+  user-select: none;
+  border-top: 1px solid #f5f5f5;
+  transition: color 0.15s;
 }
 
-.history-view-all:active {
-  background-color: #f5f5f5;
+.history-load-more:active {
   color: var(--b-pink);
+}
+
+.history-load-more--end {
+  cursor: default;
+  color: #ccc;
+}
+
+.history-load-more--end:active {
+  color: #ccc;
 }
 
 /* ==================== 已屏蔽UP ==================== */

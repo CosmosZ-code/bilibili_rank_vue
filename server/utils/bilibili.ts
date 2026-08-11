@@ -557,14 +557,16 @@ export async function getBilibiliVideoStats(bvid: string): Promise<{
  *
  * API: GET /x/web-interface/history/cursor
  * 需要 Cookie(SESSDATA)
+ * 分页为 IFS 游标式：max/view_at/business 取自上一页 data.cursor（截止点）
  */
 export async function fetchBilibiliHistory(
   cookie: string,
-  page?: { max?: number; viewAt?: number },
+  page?: { max?: number; viewAt?: number; business?: string },
 ): Promise<any> {
   const params: Record<string, string> = {}
   if (page?.max) params.max = String(page.max)
   if (page?.viewAt) params.view_at = String(page.viewAt)
+  if (page?.business) params.business = page.business
 
   return bilibiliRequest('/x/web-interface/history/cursor', {
     params,

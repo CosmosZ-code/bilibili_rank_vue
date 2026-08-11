@@ -17,10 +17,11 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  // 解析分页参数
+  // 解析分页参数（游标分页：max/view_at/business 为上一页 cursor 的截止点）
   const query = getQuery(event)
   const max = query.max ? Number(query.max) : undefined
   const viewAt = query.view_at ? Number(query.view_at) : undefined
+  const business = query.business ? String(query.business) : undefined
 
-  return await fetchBilibiliHistory(cookie, { max, viewAt })
+  return await fetchBilibiliHistory(cookie, { max, viewAt, business })
 })

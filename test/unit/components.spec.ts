@@ -129,6 +129,12 @@ describe('组件关键内容验证', () => {
     expect(content).toContain('historyOpen = ref(true)')
     // 折叠菜单标题 sticky 吸顶（下滑时维持顶部）
     expect(content).toContain('sticky')
+    // 历史下滑加载下一页：最多 HISTORY_MAX_PAGES 页，加载条可点击兜底
+    expect(content).toContain('下滑加载更多...')
+    expect(content).toContain('HISTORY_MAX_PAGES')
+    expect(content).toContain('historyHasMore')
+    // 去掉"查看全部"按钮与数量角标
+    expect(content).not.toContain('查看全部')
   })
 
   it('MobileTopBar 包含汉堡按钮（展开侧栏）与视图切换', async () => {
