@@ -124,6 +124,18 @@ describe('storeBilibiliCookie / getBilibiliCookie', () => {
     expect(cookie).toBe('new_cookie')
   })
 
+  it('写入后解密缓存失效：先读缓存再更新，能立即读到新值', async () => {
+    const id = await upsertUser('user2b', 'CacheInvalidationUser')
+
+    // 第一次读取写入解密缓存
+    await storeBilibiliCookie(id, 'first_cookie')
+    expect(await getBilibiliCookie(id)).toBe('first_cookie')
+
+    // 重新写入（模拟重新登录/续期）→ 缓存必须失效，不能返回旧值
+    await storeBilibiliCookie(id, 'second_cookie')
+    expect(await getBilibiliCookie(id)).toBe('second_cookie')
+  })
+
   it('用户没有 Cookie 时返回 null', async () => {
     const id = await upsertUser('user3', 'NoCookie')
     const cookie = await getBilibiliCookie(id)
@@ -187,6 +199,48 @@ describe('createSession / getSessionUser / removeSession', () => {
     expect(result).not.toBeNull()
     expect(result!.user.bilibiliUid).toBe('no_cookie_uid')
     expect(result!.bilibiliCookie).toBeNull()
+  })
+
+  it('同一用户可同时存在多个有效会话（多设备共存）', async () => {
+    const id = await upsertUser('multi_dev_uid', 'MultiDeviceUser')
+
+    const sid1 = await createSession(id)
+    const sid2 = await createSession(id)
+
+    // 两个会话都有效，互不踢下线
+    const r1 = await getSessionUser(sid1)
+    const r2 = await getSessionUser(sid2)
+    expect(r1).not.toBeNull()
+    expect(r2).not.toBeNull()
+    expect(r1!.user.bilibiliUid).toBe('multi_dev_uid')
+    expect(r2!.user.bilibiliUid).toBe('multi_dev_uid')
+  })
+
+  it('创建会话时仅清理已过期会话，保留有效会话', async () => {
+    const id = await upsertUser('cleanup_uid', 'CleanupUser')
+    const db = await getDb()
+    const { sessions } = await import('../../server/db/schema')
+
+    // 手动插入一个已过期会话
+    db.insert(sessions)
+      .values({
+        sessionId: 'expired-session-001',
+        userId: id,
+        expiresAt: new Date(Date.now() - 1000).toISOString(),
+      })
+      .run()
+
+    // 创建两个新会话（第二次调用应清理掉过期会话，但保留第一个有效会话）
+    const sid1 = await createSession(id)
+    const sid2 = await createSession(id)
+
+    const rows = db.select().from(sessions).all()
+    // 过期会话已被清理，且只有两个有效会话
+    expect(rows.map((r) => r.sessionId)).not.toContain('expired-session-001')
+    expect(rows).toHaveLength(2)
+    // 有效会话均可正常查询
+    expect(await getSessionUser(sid1)).not.toBeNull()
+    expect(await getSessionUser(sid2)).not.toBeNull()
   })
 })
 

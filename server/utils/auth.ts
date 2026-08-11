@@ -33,6 +33,8 @@ export interface SessionResult {
 /**
  * 创建登录会话
  *
+ * 支持多设备共存：同一用户的旧会话不会失效，只清理已过期的会话。
+ *
  * @param userId - 用户 ID
  * @param maxAgeMs - 会话有效期（毫秒），默认 30 天
  * @returns session_id (UUID)
@@ -45,8 +47,11 @@ export async function createSession(
   const sessionId = crypto.randomUUID()
   const expiresAt = new Date(Date.now() + maxAgeMs).toISOString()
 
-  // 清理该用户已有的旧会话
-  await db.delete(sessions).where(eq(sessions.userId, userId)).run()
+  // 只清理该用户已过期的会话（保留有效会话，支持多设备共存）
+  await db
+    .delete(sessions)
+    .where(and(eq(sessions.userId, userId), lt(sessions.expiresAt, new Date().toISOString())))
+    .run()
 
   // 创建新会话
   await db.insert(sessions).values({ sessionId, userId, expiresAt }).run()
@@ -167,6 +172,20 @@ export async function upsertUser(
 // Cookie 存储
 // ============================================================
 
+/** 解密 Cookie 缓存 TTL：10 分钟（auth 中间件每个请求都读，避免反复 PBKDF2 解密） */
+const COOKIE_DECRYPT_TTL = 10 * 60 * 1000
+
+/**
+ * 已解密 Cookie 缓存（按 userId）。
+ * 写入（storeBilibiliCookie / 续期）时清除，保证重新登录后立即生效。
+ */
+const cookieDecryptCache = new Map<number, { cookie: string; cachedAt: number }>()
+
+/** 清除某用户的解密 Cookie 缓存 */
+function invalidateCookieCache(userId: number): void {
+  cookieDecryptCache.delete(userId)
+}
+
 /**
  * 加密并存储 B站 Cookie
  *
@@ -181,7 +200,10 @@ export async function storeBilibiliCookie(
 ): Promise<void> {
   const db = await getDb()
   const config = useRuntimeConfig()
-  const encrypted = encrypt(cookie, config.encryptKey)
+  const encrypted = await encrypt(cookie, config.encryptKey)
+
+  // 写入后清除解密缓存（重新登录/续期后立即读到新值）
+  invalidateCookieCache(userId)
 
   // Upsert Cookie
   const [existing] = await db
@@ -208,7 +230,7 @@ export async function storeBilibiliCookie(
 
   // 存储 refresh_token（如果有）
   if (refreshToken) {
-    const encryptedRt = encrypt(refreshToken, config.encryptKey)
+    const encryptedRt = await encrypt(refreshToken, config.encryptKey)
     // 与 SESSDATA 有效期（约 180 天）对齐
     const expiresAt = new Date(Date.now() + 180 * 24 * 3600 * 1000).toISOString()
 
@@ -243,6 +265,13 @@ export async function storeBilibiliCookie(
  */
 export async function getBilibiliCookie(userId: number): Promise<string | null> {
   const db = await getDb()
+  const config = useRuntimeConfig()
+
+  // 命中缓存（TTL 内）→ 零解密开销（auth 中间件每请求调用一次，避免反复 PBKDF2）
+  const cached = cookieDecryptCache.get(userId)
+  if (cached && Date.now() - cached.cachedAt < COOKIE_DECRYPT_TTL) {
+    return cached.cookie
+  }
 
   const [row] = await db
     .select()
@@ -252,9 +281,10 @@ export async function getBilibiliCookie(userId: number): Promise<string | null> 
 
   if (!row) return null
 
-  const config = useRuntimeConfig()
   try {
-    return decrypt(row.cookieEncrypted, config.encryptKey)
+    const cookie = await decrypt(row.cookieEncrypted, config.encryptKey)
+    cookieDecryptCache.set(userId, { cookie, cachedAt: Date.now() })
+    return cookie
   } catch {
     // 解密失败（密钥变更等），清除无效 Cookie
     await db.delete(bilibiliCookies).where(eq(bilibiliCookies.id, row.id)).run()
@@ -292,7 +322,7 @@ export async function getRefreshToken(userId: number): Promise<string | null> {
 
   const config = useRuntimeConfig()
   try {
-    return decrypt(row.refreshTokenEncrypted, config.encryptKey)
+    return await decrypt(row.refreshTokenEncrypted, config.encryptKey)
   } catch {
     // 解密失败（密钥变更等），清除无效记录
     await db.delete(refreshTokens).where(eq(refreshTokens.id, row.id)).run()

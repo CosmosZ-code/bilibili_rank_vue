@@ -223,42 +223,57 @@ export function useVideoList(options?: { getBlacklist?: () => string | undefined
   }
 
   // ---- 个性化刷新（增量合并）----
+  // 在途去重：loadInitial 与登录态 watcher 可能并发触发，
+  // 服务端 inflight 去重只合并 B站 拉取，重复 HTTP 请求仍会等满拉取时长
+  //（长连接占用，登录用户刷新页面变慢的元凶之一）→ 客户端跳过重复调用
+  let personalizedInFlight: Promise<void> | null = null
+
   async function refreshPersonalized() {
+    if (personalizedInFlight) return personalizedInFlight
+    personalizedInFlight = (async () => {
+      try {
+        const query = options?.getBlacklist
+          ? { blacklist: options.getBlacklist() }
+          : undefined
+        const res = await $fetch<{ added: VideoWithBvid[] }>(
+          '/api/ranking/personalized-refresh',
+          // 超时兜底：B站 拉取慢时客户端不无限占用连接；
+          // 服务端仍会完成拉取并写缓存，下次刷新（TTL 内）零 B站 请求
+          { method: 'POST', query, timeout: 10_000 },
+        )
+        if (!res.added || res.added.length === 0) return
+
+        // 合并总是执行（bvid 去重幂等）：
+        // 个性化缓存过期后 GET /api/ranking 不再合并，若此处跳过合并，
+        // 已从 Map 中被替换掉的个性化视频将无法恢复
+        const allVideos = [...videosMap.value.values()]
+        const existingBvids = new Set(allVideos.map((v) => v.bvid))
+        const actuallyAdded = res.added.filter((v) => !existingBvids.has(v.bvid))
+
+        const merged = mergeAndSortVideos(allVideos, res.added)
+        videosMap.value = new Map(merged.map((v) => [v.bvid, v]))
+        // 确保至少显示第一页
+        displayedCount.value = Math.max(displayedCount.value, 30)
+
+        // 仅通知去重：全部已存在或增量未变（返回相同集合）时不重复弹 toast
+        if (actuallyAdded.length === 0) return
+        const signature = buildPersonalizedSignature(res.added)
+        if (signature === lastNotifiedSignature) return
+        lastNotifiedSignature = signature
+
+        // 通知（数量 = 实际新增数；标题按在线人数降序，最热门的排最前）
+        const sortedAdded = actuallyAdded.slice().sort(compareByOnlineCount)
+        const titles = sortedAdded.map((v) => v.title)
+        const { showToast } = useToast()
+        showToast(buildPersonalizedToastMessage(actuallyAdded.length, titles), 'info')
+      } catch {
+        // 静默（网络错误等不影响主流程）
+      }
+    })()
     try {
-      const query = options?.getBlacklist
-        ? { blacklist: options.getBlacklist() }
-        : undefined
-      const res = await $fetch<{ added: VideoWithBvid[] }>(
-        '/api/ranking/personalized-refresh',
-        { method: 'POST', query },
-      )
-      if (!res.added || res.added.length === 0) return
-
-      // 合并总是执行（bvid 去重幂等）：
-      // 个性化缓存过期后 GET /api/ranking 不再合并，若此处跳过合并，
-      // 已从 Map 中被替换掉的个性化视频将无法恢复
-      const allVideos = [...videosMap.value.values()]
-      const existingBvids = new Set(allVideos.map((v) => v.bvid))
-      const actuallyAdded = res.added.filter((v) => !existingBvids.has(v.bvid))
-
-      const merged = mergeAndSortVideos(allVideos, res.added)
-      videosMap.value = new Map(merged.map((v) => [v.bvid, v]))
-      // 确保至少显示第一页
-      displayedCount.value = Math.max(displayedCount.value, 30)
-
-      // 仅通知去重：全部已存在或增量未变（返回相同集合）时不重复弹 toast
-      if (actuallyAdded.length === 0) return
-      const signature = buildPersonalizedSignature(res.added)
-      if (signature === lastNotifiedSignature) return
-      lastNotifiedSignature = signature
-
-      // 通知（数量 = 实际新增数；标题按在线人数降序，最热门的排最前）
-      const sortedAdded = actuallyAdded.slice().sort(compareByOnlineCount)
-      const titles = sortedAdded.map((v) => v.title)
-      const { showToast } = useToast()
-      showToast(buildPersonalizedToastMessage(actuallyAdded.length, titles), 'info')
-    } catch {
-      // 静默（网络错误等不影响主流程）
+      await personalizedInFlight
+    } finally {
+      personalizedInFlight = null
     }
   }
 
