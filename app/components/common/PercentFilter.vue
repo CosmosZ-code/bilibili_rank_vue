@@ -40,7 +40,7 @@ defineEmits<{
 
 .percent-label {
   font-size: 14px;
-  color: #333;
+  color: var(--text-1);
   white-space: nowrap;
 }
 
@@ -50,7 +50,7 @@ defineEmits<{
 
 .percent-value {
   font-size: 14px;
-  color: #333;
+  color: var(--text-1);
   min-width: 40px;
   text-align: right;
 }

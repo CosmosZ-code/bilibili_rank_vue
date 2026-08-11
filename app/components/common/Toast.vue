@@ -33,7 +33,7 @@ const { toasts, removeToast } = useToast()
   min-width: 200px;
   max-width: 400px;
   padding: 12px 20px;
-  background: white;
+  background: var(--bg-card);
   border-radius: 8px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   cursor: pointer;
@@ -65,7 +65,7 @@ const { toasts, removeToast } = useToast()
 }
 
 .toast-message {
-  color: #333;
+  color: var(--text-1);
   font-size: 14px;
   line-height: 1.5;
 }

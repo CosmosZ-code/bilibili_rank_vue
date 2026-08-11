@@ -12,7 +12,7 @@
 
 <style scoped>
 .video-card {
-  background-color: #fff;
+  background-color: var(--bg-card);
   border: 1px solid var(--b-border);
   border-radius: 4px;
   overflow: hidden;
@@ -30,14 +30,14 @@
 }
 
 .skeleton-box {
-  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background: linear-gradient(90deg, var(--bg-muted) 25%, var(--bg-skeleton) 50%, var(--bg-muted) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s ease-in-out infinite;
 }
 
 .skeleton-line {
   height: 12px;
-  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background: linear-gradient(90deg, var(--bg-muted) 25%, var(--bg-skeleton) 50%, var(--bg-muted) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s ease-in-out infinite;
   border-radius: 4px;

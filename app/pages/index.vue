@@ -96,6 +96,7 @@
       </div>
     </div>
 
+    <ThemeSwitch variant="float" />
     <BackToTop :show="showBackToTop" @click="onBackToTop" />
 
     <!-- Toast 通知 -->
@@ -600,14 +601,14 @@ function onBackToTop() {
 .update-time {
   text-align: center;
   margin-top: 20px;
-  color: #99a2aa;
+  color: var(--text-3);
   font-size: 14px;
 }
 
 .subtitle {
   margin-top: 20px;
   font-size: 14px;
-  color: #222222;
+  color: var(--text-title);
   font-weight: bold;
   opacity: 0.8;
 }
@@ -617,7 +618,7 @@ function onBackToTop() {
 }
 
 .github-link a {
-  color: black;
+  color: var(--text-title);
   text-decoration: none;
   opacity: 0.8;
 }
@@ -631,7 +632,7 @@ function onBackToTop() {
   text-align: center;
   padding: 20px;
   margin-top: 10px;
-  color: #99a2aa;
+  color: var(--text-3);
   font-size: 14px;
   cursor: pointer;
   user-select: none;
@@ -644,10 +645,10 @@ function onBackToTop() {
 
 .load-more--end {
   cursor: default;
-  color: #ccc;
+  color: var(--text-3);
 }
 
 .load-more--end:hover {
-  color: #ccc;
+  color: var(--text-3);
 }
 </style>

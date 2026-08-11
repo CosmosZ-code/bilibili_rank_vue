@@ -236,7 +236,7 @@ function clearCloseTimer() {
 
 /* 下拉面板 */
 .history-panel {
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
   width: 340px;
@@ -247,7 +247,7 @@ function clearCloseTimer() {
   padding: 8px 0;
   /* Firefox 滚动条 */
   scrollbar-width: thin;
-  scrollbar-color: #d0d0d0 transparent;
+  scrollbar-color: var(--scrollbar) transparent;
 }
 
 /* 占位状态 */
@@ -257,7 +257,7 @@ function clearCloseTimer() {
   align-items: center;
   justify-content: center;
   padding: 40px 20px;
-  color: #999;
+  color: var(--text-3);
   font-size: 14px;
   gap: 8px;
 }
@@ -278,7 +278,7 @@ function clearCloseTimer() {
 .loading-spinner {
   width: 24px;
   height: 24px;
-  border: 2px solid #e5e5e5;
+  border: 2px solid var(--border);
   border-top-color: var(--b-pink);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
@@ -299,13 +299,13 @@ function clearCloseTimer() {
   text-align: center;
   padding: 10px 16px;
   font-size: 13px;
-  color: #666;
+  color: var(--text-2);
   text-decoration: none;
-  border-top: 1px solid #eee;
+  border-top: 1px solid var(--border);
   transition: background-color 0.15s, color 0.15s;
 }
 .history-view-all:hover {
-  background-color: #f5f5f5;
+  background-color: var(--bg-hover);
   color: var(--b-pink);
 }
 
@@ -321,7 +321,7 @@ function clearCloseTimer() {
 }
 
 .history-card:hover {
-  background-color: #eaeaea;
+  background-color: var(--bg-hover);
 }
 
 /* 缩略图 */
@@ -332,7 +332,7 @@ function clearCloseTimer() {
   height: 75px;
   border-radius: 4px;
   overflow: hidden;
-  background: #f0f0f0;
+  background: var(--bg-muted);
 }
 
 .card-cover img {
@@ -386,7 +386,7 @@ function clearCloseTimer() {
 .card-title {
   font-size: 13px;
   font-weight: 600;
-  color: #222;
+  color: var(--text-title);
   margin: 0;
   line-height: 1.4;
   display: -webkit-box;
@@ -399,7 +399,7 @@ function clearCloseTimer() {
 /* 播放时间 */
 .card-meta {
   font-size: 12px;
-  color: #999;
+  color: var(--text-3);
   margin: 0;
   line-height: 1.3;
 }
@@ -407,7 +407,7 @@ function clearCloseTimer() {
 /* UP主名称 */
 .card-author {
   font-size: 12px;
-  color: #999;
+  color: var(--text-3);
   margin: 0;
   line-height: 1.3;
   overflow: hidden;
@@ -425,11 +425,11 @@ function clearCloseTimer() {
 }
 
 .history-panel::-webkit-scrollbar-thumb {
-  background: #d0d0d0;
+  background: var(--scrollbar);
   border-radius: 3px;
 }
 
 .history-panel::-webkit-scrollbar-thumb:hover {
-  background: #b0b0b0;
+  background: var(--border-strong);
 }
 </style>

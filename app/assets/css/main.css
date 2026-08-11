@@ -1,12 +1,12 @@
 /* ============================================================
- * 全局样式变量 — B站色系主题
+ * 全局样式变量 — B站色系主题（日间/夜间）
+ * [data-theme='dark'] 由 useTheme 设置到 <html> 上
  * ============================================================ */
 
 :root {
   /* B站品牌色 */
   --b-pink: #fb7299;
   --b-blue: #00AEEC;
-  --b-dark: #222222;
   --b-gray: #99a2aa;
   --b-border: #e5e9ef;
   --b-bg: #ffffff;
@@ -16,9 +16,44 @@
   --rank-2: #C0C0C0;
   --rank-3: #CD7F32;
 
+  /* 语义色（日间默认） */
+  --bg-card: #ffffff;          /* 卡片/面板/下拉背景 */
+  --bg-hover: #f5f5f5;         /* hover 底色 */
+  --bg-muted: #f0f0f0;         /* 封面占位/分区标签底 */
+  --bg-skeleton: #e0e0e0;      /* 骨架屏渐变深端 */
+  --text-title: #222222;       /* 标题 */
+  --text-1: #333333;           /* 正文 */
+  --text-2: #666666;           /* 次要文字 */
+  --text-3: #999999;           /* 占位/弱文字 */
+  --border: #eeeeee;           /* 分隔线/细边框 */
+  --border-strong: #dddddd;    /* 输入框/按钮边框 */
+  --surface-glass: rgba(255, 255, 255, 0.85);    /* 毛玻璃底（顶栏/侧栏） */
+  --surface-glass-solid: rgba(255, 255, 255, 0.97); /* 毛玻璃降级（不支持 backdrop-filter） */
+  --surface-input: rgba(255, 255, 255, 0.6);     /* 半透明输入框底（搜索框） */
+  --scrollbar: #b0b0b0;
+
   /* 通用 */
-  --padding: 20px;
   --max-width: 1200px;
+}
+
+/* 夜间模式：B站夜间风（深蓝灰背景 + 深灰卡片） */
+[data-theme='dark'] {
+  --b-border: #3a3b3e;
+  --b-bg: #18191c;
+  --bg-card: #232324;
+  --bg-hover: #2b2c2f;
+  --bg-muted: #2e2f32;
+  --bg-skeleton: #3a3b3e;
+  --text-title: #f2f3f5;
+  --text-1: #e5e6e7;
+  --text-2: #9a9ea3;
+  --text-3: #6b7075;
+  --border: #3a3b3e;
+  --border-strong: #4a4b4e;
+  --surface-glass: rgba(30, 31, 34, 0.85);
+  --surface-glass-solid: rgba(30, 31, 34, 0.97);
+  --surface-input: rgba(30, 31, 34, 0.6);
+  --scrollbar: #555;
 }
 
 /* ============================================================
@@ -35,7 +70,7 @@
 
 body {
   background-color: var(--b-bg);
-  color: #333;
+  color: var(--text-1);
   font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue', 'Microsoft YaHei', sans-serif;
 }
 

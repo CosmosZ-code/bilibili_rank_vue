@@ -30,13 +30,13 @@ defineEmits<{
   text-align: left;
   background: none;
   border: none;
-  color: #333;
+  color: var(--text-1);
   font-size: 14px;
   cursor: pointer;
   transition: background-color 0.2s;
 }
 
 .nav-dropdown-item:hover {
-  background-color: #f5f5f5;
+  background-color: var(--bg-hover);
 }
 </style>

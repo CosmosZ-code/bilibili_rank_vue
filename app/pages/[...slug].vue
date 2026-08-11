@@ -32,7 +32,7 @@ if (event) {
 
 .not-found-content p {
   font-size: 1.2rem;
-  color: #999;
+  color: var(--text-3);
   margin: 0.5rem 0 2rem;
 }
 

@@ -91,6 +91,23 @@ onUnmounted(() => {
   max-height: 240px;
 }
 
+/* 夜间模式遮罩：半透明深灰压暗明亮的 Banner 图（图层与 logo 之上、导航之下）。
+   仅夜间显示，pointer-events: none 不拦截视差鼠标事件 */
+.banner-root::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+[data-theme='dark'] .banner-root::after {
+  opacity: 1;
+}
+
 .header-banner__inner {
   position: relative;
   top: 50%;

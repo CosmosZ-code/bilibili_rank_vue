@@ -371,7 +371,7 @@ onMounted(() => {
   top: 100%;
   right: 0;
   margin-top: 6px;
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 8px;
   padding: 8px 0;
   min-width: 120px;
@@ -383,7 +383,7 @@ onMounted(() => {
   padding: 10px 16px;
   border: none;
   background: transparent;
-  color: #333;
+  color: var(--text-1);
   font-size: 13px;
   cursor: pointer;
   border-radius: 0;
@@ -391,7 +391,7 @@ onMounted(() => {
   transition: background-color 0.15s;
 }
 .logout-btn:hover {
-  background: #eaeaea;
+  background: var(--bg-hover);
 }
 
 /* QR overlay */

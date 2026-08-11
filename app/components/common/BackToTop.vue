@@ -5,7 +5,9 @@
     title="返回顶部"
     @click="handleClick"
   >
-    <img width="25" height="25" src="/icons8.png" alt="返回顶部" />
+    <svg width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M5 15l7-7 7 7" />
+    </svg>
   </button>
 </template>
 
@@ -30,7 +32,8 @@ function handleClick() {
   right: 30px;
   width: 50px;
   height: 50px;
-  background: white;
+  background: var(--bg-card);
+  color: var(--b-pink);
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
   border: none;
   border-radius: 50%;

@@ -100,8 +100,8 @@ onUnmounted(() => {
   right: 0;
   height: 44px;
   padding: 0 14px;
-  /* 透明白底 + 毛玻璃：白底半透明，模糊透过的内容 */
-  background: rgba(255, 255, 255, 0.85);
+  /* 透明白底 + 毛玻璃：白底半透明，模糊透过的内容（日/夜间由 --surface-glass 切换） */
+  background: var(--surface-glass);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   z-index: 200;
@@ -111,7 +111,7 @@ onUnmounted(() => {
 /* 完全不支持 backdrop-filter 的旧设备：近不透明白底，避免内容直接透出（看起来透明） */
 @supports not ((backdrop-filter: blur(8px)) or (-webkit-backdrop-filter: blur(8px))) {
   .mobile-top-bar {
-    background: rgba(255, 255, 255, 0.97);
+    background: var(--surface-glass-solid);
   }
 }
 

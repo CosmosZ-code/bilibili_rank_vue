@@ -128,7 +128,7 @@ function openOwner() {
 
 <style scoped>
 .video-card {
-  background-color: #fff;
+  background-color: var(--bg-card);
   border: 1px solid var(--b-border);
   border-radius: 4px;
   overflow: hidden;
@@ -172,7 +172,7 @@ function openOwner() {
 }
 
 .video-title {
-  color: var(--b-dark);
+  color: var(--text-title);
   font-size: 12px;
   line-height: 14px;
   margin-bottom: 10px;
@@ -236,7 +236,7 @@ function openOwner() {
 
 .owner-more:hover {
   color: var(--b-pink);
-  background-color: #f5f5f5;
+  background-color: var(--bg-hover);
 }
 
 /* 屏蔽菜单：向上弹出（.video-card 有 overflow:hidden，不能向下溢出） */
@@ -244,7 +244,7 @@ function openOwner() {
   position: absolute;
   right: 0;
   bottom: calc(100% + 4px);
-  background: white;
+  background: var(--bg-card);
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   min-width: max-content;
@@ -255,14 +255,14 @@ function openOwner() {
 .owner-menu-item {
   padding: 8px 16px;
   font-size: 12px;
-  color: #333;
+  color: var(--text-1);
   cursor: pointer;
   white-space: nowrap;
   transition: background-color 0.15s, color 0.15s;
 }
 
 .owner-menu-item:hover {
-  background-color: #f5f5f5;
+  background-color: var(--bg-hover);
   color: var(--b-pink);
 }
 
@@ -282,7 +282,7 @@ function openOwner() {
 }
 
 .online-count {
-  color: #000;
+  color: var(--text-1);
   background-color: var(--b-border);
   font-size: 12px;
   display: flex;

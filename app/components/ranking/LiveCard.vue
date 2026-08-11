@@ -68,7 +68,7 @@ function openRoom() {
 
 <style scoped>
 .live-card {
-  background-color: #fff;
+  background-color: var(--bg-card);
   border: 1px solid var(--b-border);
   border-radius: 4px;
   overflow: hidden;
@@ -112,7 +112,7 @@ function openRoom() {
 }
 
 .live-title {
-  color: var(--b-dark);
+  color: var(--text-title);
   font-size: 12px;
   line-height: 14px;
   margin-bottom: 10px;
@@ -139,11 +139,11 @@ function openRoom() {
 }
 
 .area-tag {
-  background-color: #f0f0f0;
+  background-color: var(--bg-muted);
   border-radius: 2px;
   padding: 1px 6px;
   font-size: 11px;
-  color: #666;
+  color: var(--text-2);
 }
 
 .face-uname {
@@ -164,7 +164,7 @@ function openRoom() {
 }
 
 .online-count {
-  color: #000;
+  color: var(--text-1);
   background-color: var(--b-border);
   font-size: 12px;
   display: flex;

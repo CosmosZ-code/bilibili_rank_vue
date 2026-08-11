@@ -20,10 +20,6 @@ describe('静态资源迁移验证', () => {
     expect(existsSync(resolve(publicDir, 'logo.png'))).toBe(true)
   })
 
-  it('icons8.png 已迁移', () => {
-    expect(existsSync(resolve(publicDir, 'icons8.png'))).toBe(true)
-  })
-
   it('Banner assets 目录已迁移', () => {
     const expectedDirs = [
       '2023-10-01', '2023-10-26', '2023-11-17', '2023-12-12',

@@ -51,7 +51,7 @@
     />
 
     <!-- 搜索框（移动端移至侧栏，仅桌面端显示） -->
-    <SearchBox class="controls-search" :modelValue="searchTerm" @update:modelValue="$emit('update:searchTerm', $event)" />
+    <SearchBox :modelValue="searchTerm" @update:modelValue="$emit('update:searchTerm', $event)" />
 
     <!-- 视图切换（视频/直播 + 分区下拉）— 与移动顶栏共用 ViewSwitch -->
     <ViewSwitch
@@ -145,7 +145,7 @@ onUnmounted(() => {
 
 .b-head-t {
   font-size: 18px;
-  color: var(--b-dark);
+  color: var(--text-title);
 }
 
 .b-head-desc {
@@ -160,9 +160,9 @@ onUnmounted(() => {
 }
 
 .blacklist-btn {
-  background-color: #fff;
-  color: #999;
-  border: 1px solid #ddd;
+  background-color: var(--bg-card);
+  color: var(--text-3);
+  border: 1px solid var(--border-strong);
   padding: 8px 14px;
   font-size: 14px;
   cursor: pointer;
@@ -197,12 +197,12 @@ onUnmounted(() => {
   border-radius: 8px;
   display: inline-block;
   text-align: center;
-  box-shadow: 0 0 0 2px #fff;
+  box-shadow: 0 0 0 2px var(--bg-card);
 }
 
 .blacklist-btn:hover .blacklist-count,
 .blacklist-btn.active .blacklist-count {
-  background-color: #fff;
+  background-color: var(--bg-card);
   color: var(--b-gray);
 }
 
@@ -212,7 +212,7 @@ onUnmounted(() => {
   top: 100%;
   left: 0;
   margin-top: 4px;
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
   width: 240px;
@@ -223,7 +223,7 @@ onUnmounted(() => {
   padding: 8px 0;
   /* Firefox 滚动条 */
   scrollbar-width: thin;
-  scrollbar-color: #d0d0d0 transparent;
+  scrollbar-color: var(--scrollbar) transparent;
 }
 
 /* 空态 — 仿 history-placeholder */
@@ -232,7 +232,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   padding: 40px 20px;
-  color: #999;
+  color: var(--text-3);
   font-size: 14px;
 }
 
@@ -244,12 +244,12 @@ onUnmounted(() => {
   gap: 12px;
   padding: 10px 16px;
   font-size: 13px;
-  color: #222;
+  color: var(--text-title);
   transition: background-color 0.15s;
 }
 
 .blacklist-item:hover {
-  background-color: #eaeaea;
+  background-color: var(--bg-hover);
 }
 
 .blacklist-name {
@@ -262,9 +262,9 @@ onUnmounted(() => {
 
 .blacklist-unblock {
   flex-shrink: 0;
-  border: 1px solid #e0e0e0;
-  background: #fff;
-  color: #666;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-card);
+  color: var(--text-2);
   font-size: 12px;
   padding: 3px 10px;
   border-radius: 4px;
@@ -284,15 +284,15 @@ onUnmounted(() => {
   justify-content: center;
   gap: 16px;
   padding: 8px 16px;
-  border-top: 1px solid #eee;
+  border-top: 1px solid var(--border);
   font-size: 13px;
-  color: #666;
+  color: var(--text-2);
 }
 
 .blacklist-page-btn {
   border: none;
   background: none;
-  color: #666;
+  color: var(--text-2);
   font-size: 14px;
   line-height: 1;
   cursor: pointer;
@@ -303,11 +303,11 @@ onUnmounted(() => {
 
 .blacklist-page-btn:hover:not(:disabled) {
   color: var(--b-pink);
-  background-color: #f5f5f5;
+  background-color: var(--bg-hover);
 }
 
 .blacklist-page-btn:disabled {
-  color: #ccc;
+  color: var(--text-3);
   cursor: default;
 }
 
@@ -315,7 +315,7 @@ onUnmounted(() => {
   min-width: 32px;
   text-align: center;
   font-size: 13px;
-  color: #666;
+  color: var(--text-2);
 }
 
 /* 自定义滚动条 — 细长灰色，靠右侧（仿历史面板） */
@@ -328,12 +328,12 @@ onUnmounted(() => {
 }
 
 .blacklist-menu::-webkit-scrollbar-thumb {
-  background: #d0d0d0;
+  background: var(--scrollbar);
   border-radius: 3px;
 }
 
 .blacklist-menu::-webkit-scrollbar-thumb:hover {
-  background: #b0b0b0;
+  background: var(--border-strong);
 }
 
 /* ==================== 视图切换（ViewSwitch 组件） ==================== */

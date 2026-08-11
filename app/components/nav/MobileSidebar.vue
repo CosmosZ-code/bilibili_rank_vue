@@ -8,7 +8,7 @@
   <Transition name="sidebar-slide">
     <aside v-if="isOpen" ref="sidebarRef" class="sidebar">
       <header class="sidebar-header">
-        <span class="sidebar-title">bilibili ranking</span>
+        <ThemeSwitch variant="sidebar" />
         <button class="sidebar-close" aria-label="关闭菜单" @click="close">✕</button>
       </header>
 
@@ -284,7 +284,7 @@ onUnmounted(() => {
   left: 0;
   bottom: 0;
   width: min(280px, 82vw);
-  background: rgba(255, 255, 255, 0.85);
+  background: var(--surface-glass);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   z-index: 220;
@@ -296,7 +296,7 @@ onUnmounted(() => {
 /* 完全不支持 backdrop-filter 的旧设备：近不透明白底，避免内容直接透出 */
 @supports not ((backdrop-filter: blur(8px)) or (-webkit-backdrop-filter: blur(8px))) {
   .sidebar {
-    background: rgba(255, 255, 255, 0.97);
+    background: var(--surface-glass-solid);
   }
 }
 
@@ -308,20 +308,13 @@ onUnmounted(() => {
   justify-content: space-between;
   height: 44px;
   padding: 0 14px;
-  border-bottom: 1px solid #eee;
-}
-
-.sidebar-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--b-dark);
-  letter-spacing: 1px;
+  border-bottom: 1px solid var(--border);
 }
 
 .sidebar-close {
   border: none;
   background: none;
-  color: #999;
+  color: var(--text-3);
   font-size: 16px;
   line-height: 1;
   padding: 6px;
@@ -364,7 +357,7 @@ onUnmounted(() => {
 
 .menu-arrow {
   margin-left: auto;
-  color: #999;
+  color: var(--text-3);
   font-size: 12px;
   transition: transform 0.2s;
 }
@@ -380,11 +373,11 @@ onUnmounted(() => {
   gap: 6px;
   width: 100%;
   padding: 10px 12px;
-  border: 1px solid #eee;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: #fff;
+  background: var(--bg-card);
   font-size: 14px;
-  color: #333;
+  color: var(--text-1);
   cursor: pointer;
 }
 
@@ -404,7 +397,7 @@ onUnmounted(() => {
 
 /* ==================== 观看历史 ==================== */
 .history-body {
-  border: 1px solid #eee;
+  border: 1px solid var(--border);
   border-top: none;
   border-radius: 0 0 6px 6px;
   padding: 4px 0;
@@ -417,7 +410,7 @@ onUnmounted(() => {
   justify-content: center;
   gap: 8px;
   padding: 24px 12px;
-  color: #999;
+  color: var(--text-3);
   font-size: 13px;
 }
 
@@ -432,7 +425,7 @@ onUnmounted(() => {
 .history-spinner {
   width: 20px;
   height: 20px;
-  border: 2px solid #e5e5e5;
+  border: 2px solid var(--border);
   border-top-color: var(--b-pink);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
@@ -452,7 +445,7 @@ onUnmounted(() => {
 }
 
 .history-card + .history-card {
-  border-top: 1px solid #f5f5f5;
+  border-top: 1px solid var(--border);
 }
 
 .history-cover {
@@ -462,7 +455,7 @@ onUnmounted(() => {
   height: 55px;
   border-radius: 4px;
   overflow: hidden;
-  background: #f0f0f0;
+  background: var(--bg-muted);
 }
 
 .history-cover img {
@@ -512,7 +505,7 @@ onUnmounted(() => {
 .history-title {
   font-size: 13px;
   font-weight: 600;
-  color: #222;
+  color: var(--text-title);
   margin: 0;
   line-height: 1.4;
   display: -webkit-box;
@@ -524,7 +517,7 @@ onUnmounted(() => {
 
 .history-meta p {
   font-size: 12px;
-  color: #999;
+  color: var(--text-3);
   margin: 0;
   line-height: 1.3;
 }
@@ -540,10 +533,10 @@ onUnmounted(() => {
   text-align: center;
   padding: 12px;
   font-size: 13px;
-  color: #99a2aa;
+  color: var(--text-3);
   cursor: pointer;
   user-select: none;
-  border-top: 1px solid #f5f5f5;
+  border-top: 1px solid var(--border);
   transition: color 0.15s;
 }
 
@@ -553,16 +546,16 @@ onUnmounted(() => {
 
 .history-load-more--end {
   cursor: default;
-  color: #ccc;
+  color: var(--text-3);
 }
 
 .history-load-more--end:active {
-  color: #ccc;
+  color: var(--text-3);
 }
 
 /* ==================== 已屏蔽UP ==================== */
 .blacklist-body {
-  border: 1px solid #eee;
+  border: 1px solid var(--border);
   border-top: none;
   border-radius: 0 0 6px 6px;
   padding: 4px 0;
@@ -573,7 +566,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   padding: 24px 12px;
-  color: #999;
+  color: var(--text-3);
   font-size: 13px;
 }
 
@@ -584,11 +577,11 @@ onUnmounted(() => {
   gap: 12px;
   padding: 10px 12px;
   font-size: 13px;
-  color: #222;
+  color: var(--text-title);
 }
 
 .blacklist-item + .blacklist-item {
-  border-top: 1px solid #f5f5f5;
+  border-top: 1px solid var(--border);
 }
 
 .blacklist-name {
@@ -601,9 +594,9 @@ onUnmounted(() => {
 
 .blacklist-unblock {
   flex-shrink: 0;
-  border: 1px solid #e0e0e0;
-  background: #fff;
-  color: #666;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-card);
+  color: var(--text-2);
   font-size: 12px;
   padding: 3px 10px;
   border-radius: 4px;
