@@ -14,8 +14,13 @@ describe('页面完整渲染', async () => {
     // Footer
     expect(html).toContain('bilibili_rank_vue')
     expect(html).toContain('此页面基于以下开源项目')
-    // Banner fallback
-    expect(html).toContain('--b-blue')
+    // Banner fallback：元素 SSR 渲染，样式经 CSS 产物提供
+    // （@unocss/nuxt 默认禁用 Nuxt 内联样式，--b-blue 在产物 CSS 而非 HTML 内联）
+    expect(html).toContain('banner-fallback')
+    const cssHref = html.match(/<link[^>]*rel="stylesheet"[^>]*href="([^"]+\.css)"/)?.[1]
+    expect(cssHref).toBeTruthy()
+    const css = await $fetch<string>(cssHref!)
+    expect(css).toContain('--b-blue')
   })
 
   it('SSR 阶段渲染骨架屏（server: false 不在服务端获取数据）', async () => {

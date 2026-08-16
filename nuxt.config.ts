@@ -10,6 +10,26 @@ export default defineNuxtConfig({
     host: '0.0.0.0',
   },
 
+  // Vite 构建目标：浏览器兼容基线 iOS 12+（Safari 12+）。
+  // 会把 ?. / ?? / ??= 等 ES2020+ 语法降级为 ES2018 可解析的形式；
+  // 注意 esbuild/oxc 只降级语法、不降级运行时 API——Object.hasOwn、
+  // Array.prototype.at 等由 app/utils/polyfills.ts 内联脚本（启动前）
+  // 与 app/plugins/polyfills.client.ts（core-js）补齐。
+  vite: {
+    build: {
+      target: 'es2018',
+    },
+  },
+
+  // 旧浏览器兼容：关闭 import map（experimental.entryImportMap 默认 true）。
+  // import map 是 Safari 16.4+ 特性——开启时产物用 `import "#entry"` 引用入口
+  // chunk，iOS 12~16.3 会忽略 <script type="importmap"> 导致模块解析失败
+  // （"Module specifier, '#entry' does not start with..."）页面空白。
+  // 关闭后回退为相对路径静态 import，旧设备可正常加载。
+  experimental: {
+    entryImportMap: false,
+  },
+
   // Modules
   modules: [
     '@unocss/nuxt',

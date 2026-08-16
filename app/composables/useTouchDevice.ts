@@ -6,6 +6,8 @@
  *
  * 注意：仅客户端可用（依赖 window.matchMedia），SSR 期间返回 false。
  */
+import { onMqChange } from '../utils/mq'
+
 export function useTouchDevice() {
   const isTouch = ref(false)
 
@@ -16,12 +18,11 @@ export function useTouchDevice() {
     const onChange = (e: MediaQueryListEvent) => {
       isTouch.value = e.matches
     }
-    mq.addEventListener('change', onChange)
+    // iOS 12（Safari 12）无 addEventListener，onMqChange 内部回退 addListener
+    const off = onMqChange(mq, onChange)
 
     // 组件卸载时清理监听器
-    onUnmounted(() => {
-      mq.removeEventListener('change', onChange)
-    })
+    onUnmounted(off)
   })
 
   return { isTouch }

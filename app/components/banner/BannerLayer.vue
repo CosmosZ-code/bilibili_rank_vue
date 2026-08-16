@@ -12,6 +12,7 @@
       loop
       autoplay
       muted
+      playsinline
       class="layer-img"
       :style="imgStyle"
     />

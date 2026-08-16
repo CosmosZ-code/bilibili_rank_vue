@@ -10,6 +10,8 @@
 
 export type ThemeMode = 'light' | 'dark' | 'auto'
 
+import { onMqChange } from '../utils/mq'
+
 // ============================================================
 // 纯函数（导出供单元测试）
 // ============================================================
@@ -89,7 +91,9 @@ export function useTheme() {
     initialized = true
     const media = window.matchMedia('(prefers-color-scheme: dark)')
     systemPrefersDark.value = media.matches
-    media.addEventListener('change', (e) => {
+    // 模块级单例：监听器注册一次、应用生命周期内不解除，忽略返回值
+    // （内部处理 iOS 12 无 addEventListener 时的 addListener 回退）
+    onMqChange(media, (e) => {
       systemPrefersDark.value = e.matches
     })
   }

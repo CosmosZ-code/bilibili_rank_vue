@@ -143,8 +143,15 @@ describe('组件触屏适配代码结构验证', () => {
     it('监听 matchMedia change 事件（动态适配）', async () => {
       const fs = await import('node:fs/promises')
       const content = await fs.readFile(resolve(rootDir, 'app/composables/useTouchDevice.ts'), 'utf-8')
-      expect(content).toContain('addEventListener')
-      expect(content).toContain('removeEventListener')
+      // 监听注册/清理统一走 onMqChange（app/utils/mq.ts 内含 addEventListener /
+      // removeEventListener 与 iOS 12 的 addListener 回退）
+      expect(content).toContain('onMqChange')
+      expect(content).toContain('onUnmounted(off)')
+      const mqUtil = await fs.readFile(resolve(rootDir, 'app/utils/mq.ts'), 'utf-8')
+      expect(mqUtil).toContain('addEventListener')
+      expect(mqUtil).toContain('removeEventListener')
+      expect(mqUtil).toContain('addListener')
+      expect(mqUtil).toContain('removeListener')
     })
 
     it('SSR 安全：仅在 onMounted 中访问 window', async () => {

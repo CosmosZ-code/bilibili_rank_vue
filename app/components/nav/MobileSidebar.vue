@@ -272,7 +272,11 @@ onUnmounted(() => {
 /* 遮罩层 */
 .sidebar-overlay {
   position: fixed;
-  inset: 0;
+  /* 不用 inset 简写：iOS 12（Safari 12）不支持，需长属性 */
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   background: rgba(0, 0, 0, 0.4);
   z-index: 210;
 }

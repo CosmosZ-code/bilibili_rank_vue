@@ -47,12 +47,14 @@ defineEmits<{
 .video-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  grid-gap: 20px; /* iOS 12.0/12.1 不支持 grid 的 gap 简写，用 grid-gap 兜底 */
   gap: 20px;
 }
 
 @media (max-width: 768px) {
   .video-grid {
     grid-template-columns: repeat(2, 1fr);
+    grid-gap: 6px;
     gap: 6px;
     padding: 0 6px; /* 左右余量（与切换按钮右侧余量对齐） */
   }
