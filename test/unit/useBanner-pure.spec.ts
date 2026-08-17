@@ -11,6 +11,7 @@ import {
   lerp,
   calcLayerTransform,
   calcCompensate,
+  calcContainerHeight,
 } from '../../app/composables/useBanner'
 import type { BannerLayerData } from '../../app/types'
 
@@ -54,6 +55,53 @@ describe('calcCompensate — 视窗补偿', () => {
     expect(calcCompensate(3300)).toBe(2)
     expect(calcCompensate(2475)).toBe(1.5)
     expect(calcCompensate(1920)).toBeCloseTo(1.1636, 3)
+  })
+
+  it('未传入 baseHeight 时与旧行为一致（fallback 套装 1 层 0 无 height）', () => {
+    expect(calcCompensate(1580, BASE, undefined)).toBe(1)
+    expect(calcCompensate(1920, BASE, undefined)).toBeCloseTo(1.1636, 3)
+    expect(calcCompensate(3300, BASE, undefined)).toBe(2)
+  })
+
+  it('传入 baseHeight 时保证底图高度 ≥ 容器高度（覆盖模式）', () => {
+    // 1580px：容器 158px / 底图 157px → 补偿 158/157，底图恰好填满容器
+    expect(calcCompensate(1580, BASE, 157)).toBeCloseTo(1.0064, 3)
+    // 1920px：容器 192px，比例补偿 1.1636 不够，覆盖补偿 192/157 胜出
+    expect(calcCompensate(1920, BASE, 157)).toBeCloseTo(1.2229, 3)
+    // 2400px：容器封顶 240px，覆盖补偿 240/157 胜出
+    expect(calcCompensate(2400, BASE, 157)).toBeCloseTo(1.5287, 3)
+  })
+
+  it('覆盖模式下比例补偿胜出时保持旧行为（底图本身足够高）', () => {
+    // 底图 169px（2025-09-10）：1920px 时比例补偿 1.1636 已满足覆盖
+    expect(calcCompensate(1920, BASE, 169)).toBeCloseTo(1.1636, 3)
+    // 底图 162px（2026-04-27 等）：1920px 时覆盖补偿 192/162 略微胜出
+    expect(calcCompensate(1920, BASE, 162)).toBeCloseTo(1.1852, 3)
+    // 超大窗口：比例补偿远超容器封顶需求，比例胜出
+    expect(calcCompensate(3300, BASE, 157)).toBe(2)
+  })
+
+  it('覆盖模式下窗口小于基准宽度时仍不缩小（底图保持设计尺寸）', () => {
+    // 1500px：容器 155px（min-height），比例 0.909、覆盖 155/157 均 < 1 → 返回 1
+    expect(calcCompensate(1500, BASE, 157)).toBe(1)
+  })
+})
+
+describe('calcContainerHeight — 容器高度（10vw 夹取 155~240px，与 BannerContainer.vue CSS 同步）', () => {
+  it('10vw 在夹取区间内时按视口 10% 计算', () => {
+    expect(calcContainerHeight(1580)).toBe(158)
+    expect(calcContainerHeight(1650)).toBe(165)
+    expect(calcContainerHeight(1920)).toBe(192)
+  })
+
+  it('低于 min-height 时夹取到 155px', () => {
+    expect(calcContainerHeight(1550)).toBe(155)
+    expect(calcContainerHeight(1000)).toBe(155)
+  })
+
+  it('高于 max-height 时夹取到 240px', () => {
+    expect(calcContainerHeight(2400)).toBe(240)
+    expect(calcContainerHeight(3000)).toBe(240)
   })
 })
 

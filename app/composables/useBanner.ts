@@ -9,8 +9,31 @@ export function lerp(start: number, end: number, amt: number): number {
   return (1 - amt) * start + amt * end
 }
 
-export function calcCompensate(windowWidth: number, baseWidth = 1650): number {
-  return windowWidth > baseWidth ? windowWidth / baseWidth : 1
+/**
+ * Banner 容器高度（与 BannerContainer.vue `.banner-root` 的 CSS 保持一致）：
+ * `height: 10vw; min-height: 155px; max-height: 240px`，改 CSS 时须同步这里。
+ */
+const CONTAINER_MIN_HEIGHT = 155
+const CONTAINER_MAX_HEIGHT = 240
+
+export function calcContainerHeight(windowWidth: number): number {
+  return Math.min(Math.max(windowWidth * 0.1, CONTAINER_MIN_HEIGHT), CONTAINER_MAX_HEIGHT)
+}
+
+/**
+ * 视窗补偿系数。
+ *
+ * @param baseHeight 不透明底图层高度（即 data[0].height）。传入时额外保证
+ * 底图高度 ≥ 容器高度——图层在容器内垂直居中，底图比容器矮会在顶部/底部
+ * 露出透明空隙（白条）。未传入时保持旧的纯比例行为（fallback 套装 1 的
+ * 层 0 无 height 字段，自动回退）。
+ */
+export function calcCompensate(windowWidth: number, baseWidth = 1650, baseHeight?: number): number {
+  let c = windowWidth > baseWidth ? windowWidth / baseWidth : 1
+  if (baseHeight) {
+    c = Math.max(c, calcContainerHeight(windowWidth) / baseHeight)
+  }
+  return c
 }
 
 /**
@@ -89,11 +112,19 @@ export function calcLayerTransform(
 export function useBanner(initialBanners?: BannerDataSet[]) {
   const banners = ref<BannerDataSet[]>(initialBanners ?? [])
   const currentIndex = ref(0)
-  const compensate = ref(1)
+  const windowWidth = ref(1650)
   const moveX = ref(0)
   const initX = ref(0)
 
   const currentBanner = computed(() => banners.value[currentIndex.value] ?? null)
+
+  /**
+   * 补偿系数依赖当前套装底图层高度（data[0] 为不透明全幅底图的数据约定）。
+   * 用 computed 而非 ref：随机选套装（randomizeIndex）后无需手动重算。
+   */
+  const compensate = computed(() =>
+    calcCompensate(windowWidth.value, 1650, currentBanner.value?.data?.[0]?.height),
+  )
 
   const layers = computed<BannerLayerData[]>(() => {
     if (!currentBanner.value) return []
@@ -107,7 +138,7 @@ export function useBanner(initialBanners?: BannerDataSet[]) {
   })
 
   function updateCompensate() {
-    if (typeof window !== 'undefined') compensate.value = calcCompensate(window.innerWidth)
+    if (typeof window !== 'undefined') windowWidth.value = window.innerWidth
   }
 
   function randomizeIndex() {
