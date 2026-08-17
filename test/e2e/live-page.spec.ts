@@ -25,10 +25,12 @@ describe('直播页面功能', async () => {
 
   it('点击"直播"标签切换到直播视图', async () => {
     const page = await createPage('/')
-    await page.waitForSelector('.live-trigger', { timeout: 5000 })
+    await page.waitForSelector('.live-trigger:visible', { timeout: 5000 })
 
-    // "直播"标签是 .live-trigger（非 .tab-btn），直接定位点击
-    const liveTab = await page.$('.live-trigger')
+    // "直播"标签是 .live-trigger（非 .tab-btn），直接定位点击。
+    // 注意：ViewSwitch 在 MobileTopBar（compact）与 RankingControls 各渲染一个实例，
+    // DOM 中第一个可能是隐藏的移动端实例（>768px 时 display:none）——必须用 :visible 过滤可见实例
+    const liveTab = await page.$('.live-trigger:visible')
     expect(liveTab).not.toBeNull()
 
     if (liveTab) {
@@ -60,10 +62,10 @@ describe('直播页面功能', async () => {
 
   it('切换到"视频"标签回到视频视图', async () => {
     const page = await createPage('/?view=live')
-    await page.waitForSelector('.tab-btn', { timeout: 5000 })
+    await page.waitForSelector('.tab-btn:visible', { timeout: 5000 })
 
     // 点击"视频"标签
-    const tabs = await page.$$('.tab-btn')
+    const tabs = await page.$$('.tab-btn:visible')
     let videoTab = null
     for (const tab of tabs) {
       const text = await tab.evaluate((el: Element) => el.textContent)
@@ -140,10 +142,10 @@ describe('直播页面功能', async () => {
   // ============================================================
   it('视频 ↔ 直播连续切换不报错', { timeout: 20000 }, async () => {
     const page = await createPage('/')
-    await page.waitForSelector('.live-trigger', { timeout: 5000 })
+    await page.waitForSelector('.live-trigger:visible', { timeout: 5000 })
 
     // 切换到直播
-    const liveTrigger = await page.$('.live-trigger')
+    const liveTrigger = await page.$('.live-trigger:visible')
     expect(liveTrigger).not.toBeNull()
     if (liveTrigger) {
       await liveTrigger.click()
@@ -152,7 +154,7 @@ describe('直播页面功能', async () => {
     expect(page.url()).toContain('view=live')
 
     // 切回视频
-    const tabs = await page.$$('.tab-btn')
+    const tabs = await page.$$('.tab-btn:visible')
     let videoTab = null
     for (const tab of tabs) {
       const text = await tab.evaluate((el: Element) => el.textContent)
@@ -168,7 +170,7 @@ describe('直播页面功能', async () => {
     expect(page.url()).not.toContain('view=live')
 
     // 再次切换到直播
-    const liveTrigger2 = await page.$('.live-trigger')
+    const liveTrigger2 = await page.$('.live-trigger:visible')
     if (liveTrigger2) {
       await liveTrigger2.click()
       await page.waitForFunction(() => window.location.href.includes('view=live'), { timeout: 5000 })
@@ -247,7 +249,7 @@ describe('直播页面功能', async () => {
     // ============================================================
     // 切换到直播模式
     // ============================================================
-    const liveTrigger = await page.$('.live-trigger')
+    const liveTrigger = await page.$('.live-trigger:visible')
     expect(liveTrigger).not.toBeNull()
     await liveTrigger!.click()
     await page.waitForSelector('.live-card', { timeout: 5000 })
@@ -258,7 +260,7 @@ describe('直播页面功能', async () => {
     // 辅助函数：hover 下拉 → 点击第 n 个分区项
     // ============================================================
     async function selectAreaNth(index: number) {
-      await page.$eval('.live-dropdown', (el) => {
+      await page.$eval('.live-dropdown:visible', (el) => {
         el.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }))
       })
       await page.waitForTimeout(300)
