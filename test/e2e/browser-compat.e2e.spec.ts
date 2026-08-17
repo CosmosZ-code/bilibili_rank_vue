@@ -129,6 +129,31 @@ describe('兼容看护：现代浏览器路径（必须始终全绿）', () => {
     await page.close()
   })
 
+  it('Banner logo 可点击区域与图片框精确一致（pointer-events / 基线间隙回归）', async () => {
+    const page = await createPage('/')
+    await page.waitForSelector('.header-banner__logo-link', { timeout: 10_000 }).catch(() => {})
+
+    const boxes = await page.$$eval('.header-banner__logo-link', (els: Element[]) => {
+      const a = els[0]
+      const img = a?.querySelector('img')
+      if (!a || !img) return null
+      const ar = a.getBoundingClientRect()
+      const ir = img.getBoundingClientRect()
+      return {
+        a: { x: ar.x, y: ar.y, w: ar.width, h: ar.height },
+        i: { x: ir.x, y: ir.y, w: ir.width, h: ir.height },
+      }
+    })
+
+    expect(boxes).not.toBeNull()
+    // 可点击区域与可见图片在 1px 容差内一致（同一 transform 祖先，坐标空间相同）
+    expect(Math.abs(boxes!.a.x - boxes!.i.x)).toBeLessThanOrEqual(1)
+    expect(Math.abs(boxes!.a.y - boxes!.i.y)).toBeLessThanOrEqual(1)
+    expect(Math.abs(boxes!.a.w - boxes!.i.w)).toBeLessThanOrEqual(1)
+    expect(Math.abs(boxes!.a.h - boxes!.i.h)).toBeLessThanOrEqual(1)
+    await page.close()
+  })
+
   it('视频网格保持 grid 多列布局', async () => {
     const page = await createPage('/')
     await waitForRealCards(page)

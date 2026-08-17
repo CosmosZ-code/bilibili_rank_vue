@@ -20,7 +20,7 @@
 
     <!-- B站 Logo（居中） -->
     <div class="header-banner__inner">
-      <a href="//www.bilibili.com">
+      <a href="//www.bilibili.com" class="header-banner__logo-link">
         <img alt="B站" width="162" height="78" src="/logo.png" />
       </a>
     </div>
@@ -119,6 +119,13 @@ onUnmounted(() => {
   z-index: 1;
   max-width: 1160px;
   margin: 0 auto;
+}
+
+/* 锚点命中盒与 logo 图片框精确一致：inline-block 收缩贴合图片宽度，
+   line-height: 0 消除行内基线描述符间隙（可点击区域 ≠ 可见图片） */
+.header-banner__logo-link {
+  display: inline-block;
+  line-height: 0;
 }
 
 @media (max-width: 768px) {
