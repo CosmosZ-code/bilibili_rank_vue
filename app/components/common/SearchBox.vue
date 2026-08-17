@@ -45,6 +45,13 @@ defineEmits<{
   box-shadow: 0 0 0 3px rgba(251, 114, 153, 0.15); /* 粉色柔光晕 */
 }
 
+/* 768–1280px：控制栏强制单行（RankingControls 的 nowrap），行内溢出时允许搜索框收缩 */
+@media (min-width: 768px) and (max-width: 1280px) {
+  .search-box {
+    min-width: 0; /* 输入框默认最小宽度≈placeholder 宽度，放开后才能继续收缩 */
+  }
+}
+
 /* 移动端：侧栏内全宽（控制栏的搜索框此时已被隐藏，无副作用） */
 @media (max-width: 768px) {
   .search-box {

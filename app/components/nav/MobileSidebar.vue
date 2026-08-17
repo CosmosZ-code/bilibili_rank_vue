@@ -488,7 +488,7 @@ onUnmounted(() => {
   line-height: 1;
   padding: 2px 4px;
   border-radius: 3px;
-  font-family: monospace;
+  font-variant-numeric: tabular-nums;
 }
 
 /* 直播徽章（直播项无时长，置于封面右上角） */
@@ -634,11 +634,19 @@ onUnmounted(() => {
   transform: translateX(-100%);
 }
 
-/* 桌面端不渲染侧栏（与 MobileTopBar 同断点） */
-@media (min-width: 769px) {
-  .sidebar-overlay,
+/* 桌面端隐藏侧栏：断点与 MobileTopBar 一致（默认隐藏 + max-width: 768px 显示）。 */
+.sidebar-overlay,
+.sidebar {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .sidebar-overlay {
+    display: block;
+  }
+
   .sidebar {
-    display: none;
+    display: flex;
   }
 }
 </style>

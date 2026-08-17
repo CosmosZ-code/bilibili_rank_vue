@@ -146,9 +146,14 @@ onUnmounted(() => {
   background: rgba(0, 0, 0, 0.08);
 }
 
-@media (min-width: 769px) {
+/* 桌面端隐藏顶栏：断点与 controls 隐藏（RankingControls max-width: 768px）共用 768 */
+.mobile-top-bar {
+  display: none;
+}
+
+@media (max-width: 768px) {
   .mobile-top-bar {
-    display: none;
+    display: flex;
   }
 }
 </style>

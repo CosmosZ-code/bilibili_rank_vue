@@ -3,7 +3,7 @@
     <!-- 标题区 -->
     <div class="b-head online">
       <span class="b-head-i"></span>
-      <span class="b-head-t">观看列表</span> <span class="b-head-desc">根据稿件网页端的观看情况，定时更新</span>
+      <span class="b-head-t">观看列表</span> <span class="b-head-desc" title="根据稿件网页端的观看情况，定时更新">根据稿件网页端的观看情况，定时更新</span>
     </div>
 
     <!-- 已屏蔽UP（点击展开管理下拉）— 仅视频模式显示（黑名单只过滤视频排行，直播不受影响） -->
@@ -351,6 +351,32 @@ onUnmounted(() => {
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+/* 768–1280px：控制栏一行放不下时会换行；视频/直播切换增减"已屏蔽UP"按钮导致行数变化、切换按钮跳行。
+   此区间强制单行（nowrap）：行内溢出时标题说明文字可收缩省略、搜索框可收缩（见 SearchBox.vue） */
+@media (min-width: 768px) and (max-width: 1280px) {
+  .controls {
+    flex-wrap: nowrap;
+    gap: 10px; /* 溢出收缩时项目间的最小间隙，避免搜索框与切换按钮贴在一起 */
+  }
+
+  .b-head {
+    display: flex;
+    align-items: baseline;
+    min-width: 0; /* 关键：放开 flex 最小宽度，标题区才可收缩 */
+  }
+
+  .b-head-t {
+    flex-shrink: 0; /* "观看列表"标题不收缩 */
+  }
+
+  .b-head-desc {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 
 /* 移动端：整个控制栏隐藏（切换按钮移至顶栏 MobileTopBar，其余控件收纳进侧栏）。

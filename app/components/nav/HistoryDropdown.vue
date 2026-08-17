@@ -363,7 +363,7 @@ function clearCloseTimer() {
   line-height: 1;
   padding: 2px 4px;
   border-radius: 3px;
-  font-family: monospace;
+  font-variant-numeric: tabular-nums;
 }
 
 /* 直播徽章（直播项无时长，置于封面右上角） */
